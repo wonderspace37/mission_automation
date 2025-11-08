@@ -1,27 +1,42 @@
 export default async function handler(req, res) {
     try {
+        console.log("Incoming request method:", req.method);
+        console.log("Request body raw:", req.body);
+
+        // 1️⃣ Method check
         if (req.method !== "POST") {
-            res.status(405).send("Method not allowed");
-            return;
+            return res.status(405).send("❌ Only POST allowed");
         }
 
-        const { waypoints } = req.body || {};
-        if (!waypoints?.length) {
-            res.status(400).send("No waypoints provided");
-            return;
+        // 2️⃣ Validate body
+        if (!req.body) {
+            return res.status(400).send("❌ Empty body received");
         }
 
-        // Build CSV
-        let csv = "horizontal,vertical,bearing,hold_time,speed\n";
-        for (const wp of waypoints) {
-            csv += `${wp.horizontal},${wp.vertical},${wp.bearing},${wp.hold_time},${wp.speed}\n`;
+        const { waypoints, init_lat, init_lon, init_bearing, poi_altitude } = req.body;
+        if (!waypoints || !Array.isArray(waypoints) || waypoints.length === 0) {
+            return res.status(400).send("❌ 'waypoints' missing or empty");
         }
 
+        console.log(`Processing ${waypoints.length} waypoints...`);
+        console.log("Extra fields:", { init_lat, init_lon, init_bearing, poi_altitude });
+
+        // 3️⃣ Generate CSV header + rows
+        let csv = "latitude,longitude,altitude(m),heading(deg),speed(m/s)\n";
+        for (const [i, wp] of waypoints.entries()) {
+            csv += `${init_lat || ""},${init_lon || ""},${wp.vertical || 0},${wp.bearing || 0},${wp.speed || 0}\n`;
+        }
+
+        console.log("CSV generated successfully:\n", csv);
+
+        // 4️⃣ Send file response
         res.setHeader("Content-Type", "text/csv");
         res.setHeader("Content-Disposition", "attachment; filename=litchi_waypoints.csv");
         res.status(200).send(csv);
     } catch (err) {
-        console.error("API error:", err);
-        res.status(500).send("Internal Server Error: " + err.message);
+        console.error("🔥 API generate.js crashed:", err);
+        res
+            .status(500)
+            .send("❌ Server crashed: " + (err.stack || err.message || "Unknown error"));
     }
 }
