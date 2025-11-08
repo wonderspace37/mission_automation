@@ -147,7 +147,7 @@ let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
 // ---------- MAP INIT ----------
 map = new maplibregl.Map({
   container: 'map',
-  style: 'https://api.maptiler.com/maps/hybrid/style.json?key=YOUR_KEY_HERE', // or use a Carto 3D terrain style
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   center: [home.lon, home.lat],
   zoom: 16,
   pitch: 55,
@@ -193,10 +193,14 @@ function drawHomeLabel() {
 
 
 function drawHomeMarker(){
+  if (window.homeMarker) homeMarker.remove();   // <-- remove previous
   const el = document.createElement('div');
   el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
-  new maplibregl.Marker({ element: el }).setLngLat([home.lon, home.lat]).addTo(map);
+  window.homeMarker = new maplibregl.Marker({ element: el })
+    .setLngLat([home.lon, home.lat])
+    .addTo(map);
 }
+
 
 // ---------- ADD WAYPOINT ----------
 document.getElementById('addWaypoint').onclick = () => {
