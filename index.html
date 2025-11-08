@@ -3,19 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mission Automation • Map + 3D Preview</title>
+  <title>Mission Automation • Relative Waypoints</title>
 
-  <!-- Inline favicon to avoid server errors -->
+  <!-- Inline favicon -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' rx='8' fill='%230e1117'/%3E%3Ctext x='50%25' y='56%25' font-size='36' text-anchor='middle' fill='%23fff'%3E🛰️%3C/text%3E%3C/svg%3E" />
 
-  <!-- MapLibre GL (no token needed) -->
+  <!-- MapLibre, Turf, Three.js -->
   <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
-
-  <!-- Turf.js for geodesy (distance/bearing) -->
   <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
-
-  <!-- Three.js for 3D preview -->
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 
   <style>
@@ -44,80 +40,34 @@
     th{color:#aab}
     td.actions{width:40px;text-align:right}
     .hint{font-size:12px;color:#9aa4bd;margin-top:6px}
-    .kbd{font-family:ui-monospace,Menlo,monospace;border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#0d1118}
     .footer{font-size:11px;color:#8b94ac;margin-top:8px}
   </style>
 </head>
 <body>
   <div class="layout">
-    <!-- LEFT: Controls -->
-    <div class="panel" id="controls">
-      <h1>🛰️ Mission Automation (Litchi CSV)</h1>
-      <div class="row">
-        <div>
-          <label>Initial Latitude</label>
-          <input id="lat" value="37.526643" placeholder="e.g. 37.526643" />
-        </div>
-        <div>
-          <label>Initial Longitude</label>
-          <input id="lon" value="-121.966697" placeholder="-121.966697" />
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label>Initial Bearing (° from North)</label>
-          <input id="bearing" value="0" placeholder="0" />
-        </div>
-        <div>
-          <label>POI Altitude (m)</label>
-          <input id="poi" value="1" placeholder="1" />
-        </div>
-      </div>
-
-      <div class="row-3">
-        <div>
-          <label>Speed (m/s)</label>
-          <input id="speed" value="0" placeholder="0 (use aircraft default)" />
-        </div>
-        <div>
-          <label>Curve Size (m)</label>
-          <input id="curve" value="0" placeholder="0 (straight lines)" />
-        </div>
-        <div>
-          <label>Gimbal Pitch (°)</label>
-          <input id="pitch" value="0" placeholder="0" />
-        </div>
-      </div>
+    <div class="panel">
+      <h1>🛰️ Mission Automation — Relative Waypoints</h1>
 
       <div class="row">
-        <div>
-          <label>Photo Interval (s)</label>
-          <input id="photoInterval" value="1" placeholder="1" />
-        </div>
-        <div style="display:flex;align-items:end;justify-content:flex-end">
-          <span class="pill">Rule: WP0 = 5 m • WP ≥1 min 2 m</span>
-        </div>
+        <div><label>Initial Latitude</label><input id="lat" value="37.526643"></div>
+        <div><label>Initial Longitude</label><input id="lon" value="-121.966697"></div>
+      </div>
+      <div class="row">
+        <div><label>Initial Bearing (° from North)</label><input id="bearing" value="60"></div>
+        <div><label>POI Altitude (m)</label><input id="poi" value="1"></div>
       </div>
 
       <div class="hr"></div>
+
       <div class="stack">
-        <button class="ghost" id="setHome">📍 Set Home from Map Center</button>
-        <button class="ghost" id="addFromMap">➕ Add WP @ Center</button>
-        <button class="ghost" id="clearWPs">🗑️ Clear WPs</button>
+        <button class="primary" id="addWaypoint">➕ Add Waypoint</button>
+        <button class="ghost" id="clearWPs">🗑️ Clear</button>
       </div>
-      <div class="hint">Tip: Click the map to add a waypoint. Drag markers to adjust.</div>
 
       <div class="hr"></div>
       <table id="wpTable">
         <thead>
-          <tr>
-            <th>#</th>
-            <th>Lat</th>
-            <th>Lon</th>
-            <th>Alt (m)</th>
-            <th>Hold (s)</th>
-            <th class="actions"></th>
-          </tr>
+          <tr><th>#</th><th>Distance (m)</th><th>Altitude (m)</th><th>Heading (° rel)</th><th></th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -127,249 +77,155 @@
         <button class="ghost" id="preview3s">🎬 3-sec Preview</button>
         <button class="primary" id="generate">Generate CSV</button>
       </div>
-      <div id="status" class="hint" aria-live="polite"></div>
-      <div class="footer">Litchi CSV: lat • lon • alt(m) • heading(deg) • curvesize(m) • rotationdir • gimbalmode • gimbalpitchangle • actiontype1 • actionparam1 • altitudemode • speed(m/s) • poi_lat • poi_lon • poi_alt(m) • poi_altmode • photo_timeinterval • photo_distinterval</div>
+      <div id="status" class="hint"></div>
     </div>
 
-    <!-- RIGHT TOP: Map -->
     <div id="map" class="panel"></div>
-
-    <!-- RIGHT BOTTOM: 3D Preview -->
     <div id="preview3d" class="panel"></div>
   </div>
 
 <script>
-  // -------------------- STATE --------------------
-  let map, scene, camera, renderer, animationId;
-  let markers = []; // { marker, lat, lon, alt, hold }
-  let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
+let map, markers = [];
+let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
 
-  // -------------------- MAP --------------------
-  initMap();
-  function initMap(){
-    map = new maplibregl.Map({
-      container: 'map',
-      style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-      center: [home.lon, home.lat],
-      zoom: 16
-    });
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.on('load', () => { drawHomeMarker(); });
+// Initialize map
+map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+  center: [home.lon, home.lat],
+  zoom: 16
+});
+map.addControl(new maplibregl.NavigationControl(), 'top-right');
+map.on('load', drawHomeMarker);
 
-    // Click to add WP
-    map.on('click', (e) => {
-      addWaypointAt(e.lngLat.lng, e.lngLat.lat, 10, 0);
-    });
-  }
+function drawHomeMarker(){
+  const el = document.createElement('div');
+  el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
+  new maplibregl.Marker({ element: el }).setLngLat([home.lon, home.lat]).addTo(map);
+}
 
-  function drawHomeMarker(){
-    if (window.homeMarker) window.homeMarker.remove();
-    const el = document.createElement('div');
-    el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
-    el.title = 'Home (WP0, 5m)';
-    window.homeMarker = new maplibregl.Marker({ element: el, draggable: true })
-      .setLngLat([home.lon, home.lat])
-      .addTo(map);
-    window.homeMarker.on('dragend', () => {
-      const p = window.homeMarker.getLngLat();
-      home = { lat: p.lat, lon: p.lng, alt: 5 };
-      renderWpTable();
-    });
-  }
+// Add waypoint
+document.getElementById('addWaypoint').onclick = () => {
+  const idx = markers.length + 1;
+  const tbody = document.querySelector('#wpTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${idx}</td>
+    <td><input data-k="distance" data-idx="${idx-1}" value="10"></td>
+    <td><input data-k="altitude" data-idx="${idx-1}" value="5"></td>
+    <td><input data-k="heading" data-idx="${idx-1}" value="0"></td>
+    <td class="actions"><button data-del="${idx-1}">✖</button></td>`;
+  tbody.appendChild(tr);
+  bindInputs();
+  updateMarkers();
+};
 
-  function addWaypointAt(lon, lat, alt=2, hold=0){
+// Bind input updates
+function bindInputs(){
+  document.querySelectorAll('#wpTable input[data-k]').forEach(inp=>{
+    inp.onchange = ()=> updateMarkers();
+  });
+  document.querySelectorAll('#wpTable button[data-del]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const i = Number(btn.dataset.del);
+      if(markers[i]) markers[i].marker.remove();
+      markers.splice(i,1);
+      renderTable();
+    };
+  });
+}
+
+// Compute lat/lon from relative data
+function destination(lat, lon, bearing, dist){
+  const R = 6378137.0;
+  const brg = bearing * Math.PI/180;
+  const dR = dist / R;
+  const lat1 = lat*Math.PI/180, lon1 = lon*Math.PI/180;
+  const lat2 = Math.asin(Math.sin(lat1)*Math.cos(dR)+Math.cos(lat1)*Math.sin(dR)*Math.cos(brg));
+  const lon2 = lon1 + Math.atan2(Math.sin(brg)*Math.sin(dR)*Math.cos(lat1), Math.cos(dR)-Math.sin(lat1)*Math.sin(lat2));
+  return { lat: lat2*180/Math.PI, lon: lon2*180/Math.PI };
+}
+
+// Rebuild all markers based on current relative table
+function updateMarkers(){
+  markers.forEach(m=>m.marker.remove());
+  markers = [];
+  const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+  document.querySelectorAll('#wpTable tbody tr').forEach((tr,i)=>{
+    const d = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
+    const a = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
+    const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value || 0);
+    const absB = (initBearing + rel) % 360;
+    const coord = destination(home.lat, home.lon, absB, d);
     const el = document.createElement('div');
     el.style.cssText = 'width:14px;height:14px;background:#3b82f6;border:2px solid #fff;border-radius:50%';
-    el.title = `Waypoint ${markers.length+1}`;
-    const m = new maplibregl.Marker({ element: el, draggable: true })
-      .setLngLat([lon, lat])
-      .addTo(map);
-    const wp = { marker: m, lat, lon, alt: Math.max(2, alt||2), hold: Math.max(0, hold||0) };
-    m.on('dragend', () => {
+    const m = new maplibregl.Marker({element:el,draggable:true}).setLngLat([coord.lon,coord.lat]).addTo(map);
+    const wp = {marker:m, distance:d, altitude:a, heading:rel, absBearing:absB};
+    m.on('dragend',()=>{
       const p = m.getLngLat();
-      wp.lat = p.lat; wp.lon = p.lng; renderWpTable();
+      const newD = turf.distance(turf.point([home.lon,home.lat]), turf.point([p.lng,p.lat]), {units:'kilometers'})*1000;
+      const tB = turf.bearing(turf.point([home.lon,home.lat]), turf.point([p.lng,p.lat]));
+      let relNew = (tB - initBearing)%360; if(relNew<0) relNew+=360;
+      tr.querySelector('input[data-k="distance"]').value = newD.toFixed(1);
+      tr.querySelector('input[data-k="heading"]').value = relNew.toFixed(1);
+      wp.distance = newD; wp.heading = relNew;
     });
-    markers.push(wp); renderWpTable();
-  }
+    markers.push(wp);
+  });
+}
 
-  // Buttons
-  document.getElementById('setHome').onclick = () => {
-    const c = map.getCenter(); home = { lat: c.lat, lon: c.lng, alt: 5 }; drawHomeMarker(); renderWpTable();
+// Render table again after deletion
+function renderTable(){
+  const old = document.querySelector('#wpTable tbody');
+  const newBody = document.createElement('tbody');
+  markers.forEach((wp,i)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td>
+      <td><input data-k="distance" data-idx="${i}" value="${wp.distance.toFixed(1)}"></td>
+      <td><input data-k="altitude" data-idx="${i}" value="${wp.altitude.toFixed(1)}"></td>
+      <td><input data-k="heading" data-idx="${i}" value="${wp.heading.toFixed(1)}"></td>
+      <td class="actions"><button data-del="${i}">✖</button></td>`;
+    newBody.appendChild(tr);
+  });
+  old.parentNode.replaceChild(newBody, old);
+  bindInputs();
+  updateMarkers();
+}
+
+// Clear all
+document.getElementById('clearWPs').onclick=()=>{
+  markers.forEach(w=>w.marker.remove());
+  markers=[]; document.querySelector('#wpTable tbody').innerHTML='';
+};
+
+// Generate CSV
+document.getElementById('generate').onclick=async()=>{
+  const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+  const payload = {
+    init_lat: parseFloat(document.getElementById('lat').value),
+    init_lon: parseFloat(document.getElementById('lon').value),
+    init_bearing: initBearing,
+    poi_altitude: parseFloat(document.getElementById('poi').value || 1),
+    speed_start: 0,
+    curve_size: 0,
+    gimbal_pitch: 0,
+    photo_interval: 1,
+    waypoints: markers.map(w=>({
+      horizontal:w.distance,
+      vertical:w.altitude,
+      bearing:w.heading,
+      hold_time:0
+    }))
   };
-  document.getElementById('addFromMap').onclick = () => { const c = map.getCenter(); addWaypointAt(c.lng, c.lat, 10, 0); };
-  document.getElementById('clearWPs').onclick = () => { markers.forEach(w=>w.marker.remove()); markers = []; renderWpTable(); };
-
-  // Table rendering
-  function renderWpTable(){
-    const tbody = document.querySelector('#wpTable tbody');
-    tbody.innerHTML = '';
-    // WP0 row (readonly alt=5, hold=0)
-    const tr0 = document.createElement('tr');
-    tr0.innerHTML = `<td>0</td><td>${home.lat.toFixed(6)}</td><td>${home.lon.toFixed(6)}</td><td><span class="pill">5</span></td><td><span class="pill">0</span></td><td></td>`;
-    tbody.appendChild(tr0);
-    // WP1+ rows
-    markers.forEach((wp, idx) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${idx+1}</td>
-        <td>${wp.lat.toFixed(6)}</td>
-        <td>${wp.lon.toFixed(6)}</td>
-        <td><input data-k="alt" data-idx="${idx}" value="${wp.alt}" /></td>
-        <td><input data-k="hold" data-idx="${idx}" value="${wp.hold}" /></td>
-        <td class="actions"><button class="ghost" data-del="${idx}">✖</button></td>`;
-      tbody.appendChild(tr);
-    });
-    // Bind inputs
-    tbody.querySelectorAll('input[data-k]').forEach(inp => {
-      inp.onchange = () => {
-        const i = Number(inp.dataset.idx); const k = inp.dataset.k; const v = Number(inp.value);
-        if (k==='alt') markers[i].alt = Math.max(2, v||2);
-        if (k==='hold') markers[i].hold = Math.max(0, v||0);
-        renderWpTable();
-      };
-    });
-    // Delete
-    tbody.querySelectorAll('button[data-del]').forEach(btn => {
-      btn.onclick = () => { const i = Number(btn.dataset.del); markers[i].marker.remove(); markers.splice(i,1); renderWpTable(); };
-    });
-  }
-
-  // -------------------- GEODESY HELPERS --------------------
-  function metersBetween(a, b){
-    const p1 = turf.point([a.lon, a.lat]); const p2 = turf.point([b.lon, b.lat]);
-    return turf.distance(p1, p2, { units: 'kilometers' })*1000;
-  }
-  function trueBearing(a, b){
-    const p1 = turf.point([a.lon, a.lat]); const p2 = turf.point([b.lon, b.lat]);
-    let brg = turf.bearing(p1, p2); if (brg < 0) brg += 360; return brg;
-  }
-  function relativeBearing(trueB, initialB){ let r = (trueB - initialB) % 360; if (r < 0) r += 360; return r; }
-
-  function collectWaypointsRelative(){
-    // Build relative segments from previous point
-    const init_bearing = parseFloat(document.getElementById('bearing').value || 0);
-    const wps = []; let prev = { lat: home.lat, lon: home.lon };
-    markers.forEach(wp => {
-      const horiz = metersBetween(prev, wp);
-      const tB = trueBearing(prev, wp);
-      const rel = relativeBearing(tB, init_bearing);
-      wps.push({ horizontal: horiz, vertical: Math.max(2, Number(wp.alt)||2), bearing: rel, hold_time: Math.max(0, Number(wp.hold)||0) });
-      prev = { lat: wp.lat, lon: wp.lon };
-    });
-    return wps;
-  }
-
-  // -------------------- CSV GENERATION --------------------
-  document.getElementById('generate').onclick = async () => {
-    const payload = {
-      init_lat: parseFloat(document.getElementById('lat').value),
-      init_lon: parseFloat(document.getElementById('lon').value),
-      init_bearing: parseFloat(document.getElementById('bearing').value || 0),
-      poi_altitude: parseFloat(document.getElementById('poi').value || 1),
-      speed_start: parseFloat(document.getElementById('speed').value || 0),
-      curve_size: parseFloat(document.getElementById('curve').value || 0),
-      gimbal_pitch: parseFloat(document.getElementById('pitch').value || 0),
-      photo_interval: parseFloat(document.getElementById('photoInterval').value || 1),
-      waypoints: collectWaypointsRelative()
-    };
-
-    try {
-      const status = document.getElementById('status');
-      status.textContent = '⏳ Generating…';
-      // IMPORTANT: call the Vercel serverless route
-      const res = await fetch('/api/generate', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'litchi_waypoints.csv';
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-      status.textContent = '✅ CSV generated.';
-    } catch (e) {
-      console.error(e);
-      document.getElementById('status').textContent = '❌ ' + e.message;
-    }
-  };
-
-  // -------------------- THREE.JS 3D PREVIEW --------------------
-  initThree();
-  function initThree(){
-    const container = document.getElementById('preview3d');
-    renderer = new THREE.WebGLRenderer({ antialias:true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.innerHTML = ''; container.appendChild(renderer.domElement);
-
-    scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0d12);
-    camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 100000);
-    camera.position.set(0, -150, 100);
-
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(120, -90, 180); scene.add(sun);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-
-    const grid = new THREE.GridHelper(400, 40); grid.material.opacity = 0.15; grid.material.transparent = true; scene.add(grid);
-
-    window.addEventListener('resize', () => {
-      const w = container.clientWidth, h = container.clientHeight;
-      renderer.setSize(w, h); camera.aspect = w/h; camera.updateProjectionMatrix();
-    });
-  }
-
-  function buildPreviewGeometry(){
-    // remove previous path/drone
-    for (let i = scene.children.length - 1; i >= 0; i--) {
-      const obj = scene.children[i];
-      if (obj.userData && (obj.userData.path || obj.userData.drone)) scene.remove(obj);
-    }
-    // Collect geo points (WP0 + WPs)
-    const pts = [{ lat: home.lat, lon: home.lon, alt: 5 }];
-    markers.forEach(w => pts.push({ lat: w.lat, lon: w.lon, alt: Math.max(2, Number(w.alt)||2) }));
-    if (pts.length < 2) return null;
-
-    const ref = pts[0];
-    const toXY = (p) => {
-      const dE = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([p.lon, ref.lat]), {units:'kilometers'})*1000;
-      const dN = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([ref.lon, p.lat]), {units:'kilometers'})*1000;
-      return [ (p.lon>=ref.lon?dE:-dE), (p.lat>=ref.lat?dN:-dN) ];
-    };
-
-    const positions = [];
-    pts.forEach(p=>{ const [x,y]=toXY(p); positions.push(x,y,p.alt); });
-    const geom = new THREE.BufferGeometry(); geom.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
-    const mat = new THREE.LineBasicMaterial();
-    const line = new THREE.Line(geom, mat); line.userData.path = true; scene.add(line);
-
-    const drone = new THREE.Mesh(new THREE.SphereGeometry(2, 24, 16), new THREE.MeshStandardMaterial());
-    drone.position.set(...toXY(pts[0]), pts[0].alt); drone.userData.drone = true; scene.add(drone);
-
-    return { positions, drone };
-  }
-
-  document.getElementById('preview3s').onclick = () => {
-    const built = buildPreviewGeometry(); if (!built) return;
-    const { positions, drone } = built;
-    const total = positions.length/3; const duration = 3000; const start = performance.now();
-    if (animationId) cancelAnimationFrame(animationId);
-
-    const step = (now) => {
-      const t = Math.min(1, (now - start)/duration);
-      const idxF = t * (total - 1); const i = Math.floor(idxF); const a = idxF - i;
-      const i3 = i*3; const nx = positions[i3]*(1-a) + positions[i3+3]*a;
-      const ny = positions[i3+1]*(1-a) + positions[i3+4]*a; const nz = positions[i3+2]*(1-a) + positions[i3+5]*a;
-      drone.position.set(nx, ny, nz); camera.lookAt(drone.position);
-      renderer.render(scene, camera);
-      if (t<1) animationId = requestAnimationFrame(step);
-    };
-    animationId = requestAnimationFrame(step);
-  };
-
-  // Initial render
-  renderWpTable();
+  try{
+    document.getElementById('status').textContent='⏳ Generating...';
+    const res = await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='litchi_waypoints.csv'; a.click();
+    document.getElementById('status').textContent='✅ CSV ready.';
+  }catch(e){document.getElementById('status').textContent='❌ '+e.message;}
+};
 </script>
 </body>
 </html>
