@@ -274,6 +274,158 @@ document.getElementById('clearWPs').onclick = ()=>{
   markers=[];
   document.querySelector('#wpTable tbody').innerHTML='';
 };
+// ---------------- THREE.JS 3D PREVIEW (altitude-aware) ----------------
+let scene, camera, renderer, animationId;
+const ALT_SCALE = 1; // visual exaggeration: 1 m -> 10 units (change to 1 for true scale)
+
+initThree();
+
+function initThree() {
+  const container = document.getElementById('preview3d');
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  container.innerHTML = '';
+  container.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0d12);
+
+  camera = new THREE.PerspectiveCamera(
+    50,
+    container.clientWidth / container.clientHeight,
+    0.1,
+    100000
+  );
+  camera.position.set(0, -200, 120);
+
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(120, -90, 180);
+  scene.add(sun);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+
+  const grid = new THREE.GridHelper(600, 60);
+  grid.material.opacity = 0.15;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  window.addEventListener('resize', () => {
+    const w = container.clientWidth, h = container.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+  });
+}
+
+/** Convert current table -> 3D geometry.
+ * Points: WP0 at (home.lat, home.lon, 5 m), then each WP computed from (distance, rel heading) + altitude.
+ * Z = altitude * ALT_SCALE (visual).
+ * Returns { positions (Float32 array), spheres (meshes), line (THREE.Line) } or null if not enough points.
+ */
+function buildPreviewGeometry() {
+  // Remove previous path and spheres
+  for (let i = scene.children.length - 1; i >= 0; i--) {
+    const obj = scene.children[i];
+    if (obj.userData && (obj.userData.path || obj.userData.wpSphere)) scene.remove(obj);
+  }
+
+  const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+
+  // Collect geodetic points (lat, lon, altMeters)
+  const pts = [{ lat: home.lat, lon: home.lon, alt: 5 }];
+
+  document.querySelectorAll('#wpTable tbody tr').forEach(tr => {
+    const d   = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
+    const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value  || 0);
+    const alt = Math.max(2, parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2));
+    const absB = (initBearing + rel) % 360;
+    const dest = destination(home.lat, home.lon, absB, d);
+    pts.push({ lat: dest.lat, lon: dest.lon, alt });
+  });
+
+  if (pts.length < 2) return null;
+
+  // Helper: project lat/lon to local XY (meters) using turf distances from WP0
+  const ref = pts[0];
+  const toXY = (p) => {
+    const e = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([p.lon, ref.lat]), { units: 'kilometers' }) * 1000;
+    const n = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([ref.lon, p.lat]), { units: 'kilometers' }) * 1000;
+    return [(p.lon >= ref.lon ? e : -e), (p.lat >= ref.lat ? n : -n)];
+  };
+
+  // Build polyline (with altitude as Z)
+  const positions = [];
+  pts.forEach(p => {
+    const [x, y] = toXY(p);
+    positions.push(x, y, p.alt * ALT_SCALE);
+  });
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x3b82f6 }));
+  line.userData.path = true;
+  scene.add(line);
+
+  // Draw spheres at each point (green for WP0, white for others)
+  pts.forEach((p, i) => {
+    const [x, y] = toXY(p);
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(2, 20, 16),
+      new THREE.MeshStandardMaterial({ color: i === 0 ? 0x22c55e : 0xffffff })
+    );
+    sphere.position.set(x, y, p.alt * ALT_SCALE);
+    sphere.userData.wpSphere = true;
+    scene.add(sphere);
+  });
+
+  renderer.render(scene, camera);
+  return { positions: new Float32Array(positions), line };
+}
+
+// 3-sec preview animation along the path
+document.getElementById('preview3s').onclick = () => {
+  const built = buildPreviewGeometry();
+  if (!built) return;
+
+  const { positions } = built;
+
+  // Add a small drone sphere that travels along the polyline
+  const drone = new THREE.Mesh(
+    new THREE.SphereGeometry(2.5, 24, 18),
+    new THREE.MeshStandardMaterial({ color: 0x9ecbff })
+  );
+  drone.userData.wpSphere = true;
+  scene.add(drone);
+
+  // Simple animation: 3 seconds from start to end
+  const total = positions.length / 3;
+  const duration = 3000;
+  const start = performance.now();
+
+  if (animationId) cancelAnimationFrame(animationId);
+
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const idxF = t * (total - 1);
+    const i = Math.floor(idxF);
+    const a = idxF - i;
+
+    const i3 = i * 3;
+    const nx = positions[i3]     * (1 - a) + positions[i3 + 3] * a;
+    const ny = positions[i3 + 1] * (1 - a) + positions[i3 + 4] * a;
+    const nz = positions[i3 + 2] * (1 - a) + positions[i3 + 5] * a;
+
+    drone.position.set(nx, ny, nz);
+    camera.lookAt(drone.position);
+    renderer.render(scene, camera);
+
+    if (t < 1) {
+      animationId = requestAnimationFrame(step);
+    }
+  };
+
+  animationId = requestAnimationFrame(step);
+};
 
 // ---------------- CSV GENERATION ----------------
 document.getElementById('generate').onclick = async ()=>{
