@@ -33,7 +33,7 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-@app.post("/generate")
+@app.post("/api/generate")
 def generate_csv():
     """
     Expects JSON:
