@@ -82,7 +82,6 @@
 </head>
 <body>
   <div class="layout">
-    <!-- LEFT PANEL -->
     <div class="panel">
       <h1>🛰️ Mission Automation — Relative Waypoints</h1>
 
@@ -115,7 +114,6 @@
       </div>
 
       <div class="hr"></div>
-      <!-- ✅ Correct Table -->
       <table id="wpTable">
         <thead>
           <tr>
@@ -138,54 +136,47 @@
       <div id="status" class="hint"></div>
     </div>
 
-    <!-- RIGHT TOP: Map -->
     <div id="map" class="panel"></div>
-
-    <!-- RIGHT BOTTOM: 3D Preview -->
     <div id="preview3d" class="panel"></div>
   </div>
 
-<!-- ================== SCRIPT ================== -->
 <script>
 let map, markers = [];
 let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
 
-// ---------------- MAP INIT ----------------
+// ---------- MAP INIT ----------
 map = new maplibregl.Map({
   container: 'map',
-  style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+  style: 'https://api.maptiler.com/maps/streets/style.json?key=GET-YOUR-MAPTILER-KEY',
   center: [home.lon, home.lat],
   zoom: 16
 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 map.on('load', () => drawHomeMarker());
 
-// ---------------- DRAW HOME ----------------
 function drawHomeMarker(){
-  if (!map) return;
   const el = document.createElement('div');
   el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
   new maplibregl.Marker({ element: el }).setLngLat([home.lon, home.lat]).addTo(map);
 }
 
-// ---------------- ADD WAYPOINT ----------------
+// ---------- ADD WAYPOINT ----------
 document.getElementById('addWaypoint').onclick = () => {
   const idx = markers.length + 1;
   const tbody = document.querySelector('#wpTable tbody');
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>${idx}</td>
-    <td><input data-k="distance" data-idx="${idx-1}" value="10"></td>
-    <td><input data-k="altitude" data-idx="${idx-1}" value="5"></td>
-    <td><input data-k="heading" data-idx="${idx-1}" value="0"></td>
-    <td><input data-k="speed" data-idx="${idx-1}" value="5"></td>
+    <td><input data-k="distance" value="10"></td>
+    <td><input data-k="altitude" value="5"></td>
+    <td><input data-k="heading" value="0"></td>
+    <td><input data-k="speed" value="5"></td>
     <td class="actions"><button data-del="${idx-1}">✖</button></td>`;
   tbody.appendChild(tr);
   bindInputs();
   updateMarkers();
 };
 
-// ---------------- BIND INPUTS ----------------
 function bindInputs(){
   document.querySelectorAll('#wpTable input[data-k]').forEach(inp=>{
     inp.onchange = ()=> updateMarkers();
@@ -193,14 +184,13 @@ function bindInputs(){
   document.querySelectorAll('#wpTable button[data-del]').forEach(btn=>{
     btn.onclick = ()=>{
       const i = Number(btn.dataset.del);
-      if(markers[i]) markers[i].marker.remove();
+      if(markers[i]) { markers[i].marker.remove(); if(markers[i].label) markers[i].label.remove(); }
       markers.splice(i,1);
       renderTable();
     };
   });
 }
 
-// ---------------- GEO UTILS ----------------
 function destination(lat, lon, bearing, dist){
   const R = 6378137.0;
   const brg = bearing * Math.PI/180;
@@ -211,10 +201,10 @@ function destination(lat, lon, bearing, dist){
   return { lat: lat2*180/Math.PI, lon: lon2*180/Math.PI };
 }
 
-// ---------------- UPDATE MARKERS ----------------
+// ---------- UPDATE MARKERS ----------
 function updateMarkers(){
   if (!map) return;
-  markers.forEach(m=>m.marker.remove());
+  markers.forEach(m=>{ m.marker.remove(); if (m.label) m.label.remove(); });
   markers = [];
   const initBearing = parseFloat(document.getElementById('bearing').value || 0);
 
@@ -232,57 +222,38 @@ function updateMarkers(){
       .setLngLat([coord.lon,coord.lat])
       .addTo(map);
 
-    const wp = {marker:m, distance:d, altitude:a, heading:rel, absBearing:absB, speed:s};
+    // Label
+    const labelEl = document.createElement('div');
+    labelEl.textContent = `WP${i + 1}`;
+    labelEl.style.cssText = `
+      color:white;background:#0f141c;border:1px solid #444;border-radius:4px;
+      padding:1px 4px;font-size:11px;position:absolute;transform:translate(-50%, -120%);
+      pointer-events:none;
+    `;
+    const label = new maplibregl.Marker({ element: labelEl }).setLngLat([coord.lon, coord.lat]).addTo(map);
 
-    m.on('dragend',()=>{
-      const p = m.getLngLat();
-      const newD = turf.distance(turf.point([home.lon,home.lat]), turf.point([p.lng,p.lat]), {units:'kilometers'})*1000;
-      const tB = turf.bearing(turf.point([home.lon,home.lat]), turf.point([p.lng,p.lat]));
-      let relNew = (tB - initBearing)%360; if(relNew<0) relNew+=360;
-      tr.querySelector('input[data-k="distance"]').value = newD.toFixed(1);
-      tr.querySelector('input[data-k="heading"]').value = relNew.toFixed(1);
-      wp.distance = newD; wp.heading = relNew;
-    });
-
-    markers.push(wp);
+    markers.push({ marker:m, label, distance:d, altitude:a, heading:rel, absBearing:absB, speed:s });
   });
 }
 
-// ---------------- RENDER TABLE ----------------
-function renderTable(){
-  const old = document.querySelector('#wpTable tbody');
-  const newBody = document.createElement('tbody');
-  markers.forEach((wp,i)=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${i+1}</td>
-      <td><input data-k="distance" data-idx="${i}" value="${wp.distance.toFixed(1)}"></td>
-      <td><input data-k="altitude" data-idx="${i}" value="${wp.altitude.toFixed(1)}"></td>
-      <td><input data-k="heading" data-idx="${i}" value="${wp.heading.toFixed(1)}"></td>
-      <td><input data-k="speed" data-idx="${i}" value="${wp.speed.toFixed(1)}"></td>
-      <td class="actions"><button data-del="${i}">✖</button></td>`;
-    newBody.appendChild(tr);
-  });
-  old.parentNode.replaceChild(newBody, old);
-  bindInputs();
-  updateMarkers();
-}
-
-// ---------------- CLEAR ----------------
+// ---------- CLEAR ----------
 document.getElementById('clearWPs').onclick = ()=>{
-  markers.forEach(w=>w.marker.remove());
+  markers.forEach(w=>{ w.marker.remove(); if (w.label) w.label.remove(); });
   markers=[];
   document.querySelector('#wpTable tbody').innerHTML='';
 };
-// ---------------- THREE.JS 3D PREVIEW (altitude-aware) ----------------
+
+// ---------- 3D PREVIEW ----------
 let scene, camera, renderer, animationId;
-const ALT_SCALE = 1; // visual exaggeration: 1 m -> 10 units (change to 1 for true scale)
+const ALT_SCALE = 1;
 
 initThree();
 
 function initThree() {
   const container = document.getElementById('preview3d');
   renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setSize(container.clientWidth, container.clientHeight);
   container.innerHTML = '';
   container.appendChild(renderer.domElement);
@@ -290,21 +261,19 @@ function initThree() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b0d12);
 
-  camera = new THREE.PerspectiveCamera(
-    50,
-    container.clientWidth / container.clientHeight,
-    0.1,
-    100000
-  );
-  camera.position.set(0, -200, 120);
+  camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(0, -300, 200);
 
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-  sun.position.set(120, -90, 180);
+  sun.position.set(200, -150, 300);
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = 2048;
+  sun.shadow.mapSize.height = 2048;
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  scene.add(new THREE.AmbientLight(0x404040, 1.2));
 
-  const grid = new THREE.GridHelper(600, 60);
-  grid.material.opacity = 0.15;
+  const grid = new THREE.GridHelper(800, 80, 0x3b82f6, 0x444);
+  grid.material.opacity = 0.25;
   grid.material.transparent = true;
   scene.add(grid);
 
@@ -317,27 +286,19 @@ function initThree() {
   });
 }
 
-/** Convert current table -> 3D geometry.
- * Points: WP0 at (home.lat, home.lon, 5 m), then each WP computed from (distance, rel heading) + altitude.
- * Z = altitude * ALT_SCALE (visual).
- * Returns { positions (Float32 array), spheres (meshes), line (THREE.Line) } or null if not enough points.
- */
 function buildPreviewGeometry() {
-  // Remove previous path and spheres
   for (let i = scene.children.length - 1; i >= 0; i--) {
     const obj = scene.children[i];
     if (obj.userData && (obj.userData.path || obj.userData.wpSphere)) scene.remove(obj);
   }
 
   const initBearing = parseFloat(document.getElementById('bearing').value || 0);
-
-  // Collect geodetic points (lat, lon, altMeters)
   const pts = [{ lat: home.lat, lon: home.lon, alt: 5 }];
 
   document.querySelectorAll('#wpTable tbody tr').forEach(tr => {
     const d   = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
     const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value  || 0);
-    const alt = Math.max(2, parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2));
+    const alt = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
     const absB = (initBearing + rel) % 360;
     const dest = destination(home.lat, home.lon, absB, d);
     pts.push({ lat: dest.lat, lon: dest.lon, alt });
@@ -345,7 +306,6 @@ function buildPreviewGeometry() {
 
   if (pts.length < 2) return null;
 
-  // Helper: project lat/lon to local XY (meters) using turf distances from WP0
   const ref = pts[0];
   const toXY = (p) => {
     const e = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([p.lon, ref.lat]), { units: 'kilometers' }) * 1000;
@@ -353,7 +313,6 @@ function buildPreviewGeometry() {
     return [(p.lon >= ref.lon ? e : -e), (p.lat >= ref.lat ? n : -n)];
   };
 
-  // Build polyline (with altitude as Z)
   const positions = [];
   pts.forEach(p => {
     const [x, y] = toXY(p);
@@ -366,44 +325,37 @@ function buildPreviewGeometry() {
   line.userData.path = true;
   scene.add(line);
 
-  // Draw spheres at each point (green for WP0, white for others)
   pts.forEach((p, i) => {
     const [x, y] = toXY(p);
     const sphere = new THREE.Mesh(
-      new THREE.SphereGeometry(2, 20, 16),
-      new THREE.MeshStandardMaterial({ color: i === 0 ? 0x22c55e : 0xffffff })
+      new THREE.SphereGeometry(3, 24, 18),
+      new THREE.MeshStandardMaterial({ color: i === 0 ? 0x22c55e : 0xffffff, roughness: 0.6, metalness: 0.3 })
     );
     sphere.position.set(x, y, p.alt * ALT_SCALE);
+    sphere.castShadow = true;
+    sphere.receiveShadow = true;
     sphere.userData.wpSphere = true;
     scene.add(sphere);
   });
 
   renderer.render(scene, camera);
-  return { positions: new Float32Array(positions), line };
+  return { positions: new Float32Array(positions) };
 }
 
-// 3-sec preview animation along the path
 document.getElementById('preview3s').onclick = () => {
   const built = buildPreviewGeometry();
   if (!built) return;
 
   const { positions } = built;
-
-  // Add a small drone sphere that travels along the polyline
-  const drone = new THREE.Mesh(
-    new THREE.SphereGeometry(2.5, 24, 18),
-    new THREE.MeshStandardMaterial({ color: 0x9ecbff })
-  );
+  const drone = new THREE.Mesh(new THREE.SphereGeometry(3, 24, 18), new THREE.MeshStandardMaterial({ color: 0x9ecbff }));
   drone.userData.wpSphere = true;
   scene.add(drone);
 
-  // Simple animation: 3 seconds from start to end
   const total = positions.length / 3;
   const duration = 3000;
   const start = performance.now();
 
   if (animationId) cancelAnimationFrame(animationId);
-
   const step = (now) => {
     const t = Math.min(1, (now - start) / duration);
     const idxF = t * (total - 1);
@@ -419,15 +371,12 @@ document.getElementById('preview3s').onclick = () => {
     camera.lookAt(drone.position);
     renderer.render(scene, camera);
 
-    if (t < 1) {
-      animationId = requestAnimationFrame(step);
-    }
+    if (t < 1) animationId = requestAnimationFrame(step);
   };
-
   animationId = requestAnimationFrame(step);
 };
 
-// ---------------- CSV GENERATION ----------------
+// ---------- CSV GENERATION ----------
 document.getElementById('generate').onclick = async ()=>{
   const initBearing = parseFloat(document.getElementById('bearing').value || 0);
   const payload = {
@@ -460,7 +409,6 @@ document.getElementById('generate').onclick = async ()=>{
     a.click();
     document.getElementById('status').textContent = '✅ CSV ready.';
   } catch (e) {
-    console.error(e);
     document.getElementById('status').textContent = '❌ ' + e.message;
   }
 };
