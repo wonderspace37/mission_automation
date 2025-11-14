@@ -1,225 +1,370 @@
-<script>
-  let map, markers = [];
-  let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
-  
-  // ---------- MAP INIT ----------
-  map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-    center: [home.lon, home.lat],
-    zoom: 16,
-    pitch: 55,
-    bearing: -20
-  });
-  
-  map.on('load', () => {
-    drawHomeLabel();
-    drawHomeMarker();
-    document.getElementById('lat').onchange = document.getElementById('lon').onchange = () => {
-      home.lat = parseFloat(document.getElementById('lat').value);
-      home.lon = parseFloat(document.getElementById('lon').value);
-      drawHomeMarker();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mission Automation • Relative Waypoints</title>
+
+  <!-- MapLibre, Turf, Three.js -->
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0e1117;
+      --panel: #151a23;
+      --muted: #8a8fa3;
+      --text: #e7e9ef;
+      --accent: #3b82f6;
+      --border: #21293a;
+    }
+    * { box-sizing: border-box }
+    html,body {
+      height: 100%;
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      grid-template-rows: 55% 45%;
+      gap: 10px;
+      height: 100vh;
+      padding: 10px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.25);
+      padding: 14px;
+      overflow: auto;
+    }
+    #map { width: 100%; height: 100%; border-radius: 14px }
+    #preview3d { width: 100%; height: 100%; border-radius: 14px; background: #0b0d12 }
+    h1 { font-size: 18px; margin: 0 0 10px }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px }
+    input,button {
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f141c;
+      color: var(--text);
+    }
+    input:focus { outline: 2px solid #24406d }
+    button.primary {
+      background: var(--accent);
+      border: none;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.ghost {
+      background: #101521;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .stack { display: flex; gap: 10px }
+    .stack>* { flex: 1 }
+    .hr { height: 1px; background: var(--border); margin: 12px 0 }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px }
+    th,td { border-bottom: 1px solid var(--border); padding: 6px 4px; text-align: left }
+    th { color: #aab }
+    td.actions { width: 40px; text-align: right }
+    .hint { font-size: 12px; color: #9aa4bd; margin-top: 6px }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="panel">
+      <h1>🛰️ Mission Automation — Relative Waypoints</h1>
+
+      <div class="row">
+        <div>
+          <label>Initial Latitude</label>
+          <input id="lat" value="37.526643">
+        </div>
+        <div>
+          <label>Initial Longitude</label>
+          <input id="lon" value="-121.966697">
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Initial Bearing (° from North)</label>
+          <input id="bearing" value="60">
+        </div>
+        <div>
+          <label>POI Altitude (m)</label>
+          <input id="poi" value="1">
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div class="stack">
+        <button class="primary" id="addWaypoint">➕ Add Waypoint</button>
+        <button class="ghost" id="clearWPs">🗑️ Clear</button>
+      </div>
+
+      <div class="hr"></div>
+      <table id="wpTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Distance (m)</th>
+            <th>Altitude (m)</th>
+            <th>Heading (° rel)</th>
+            <th>Speed (m/s)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="hr"></div>
+      <div class="stack">
+        <button class="ghost" id="preview3s">🎬 3-sec Preview</button>
+        <button class="primary" id="generate">Generate CSV</button>
+        <button class="primary" id="generateKML">Generate KML</button>
+      </div>
+      
+      <div id="status" class="hint"></div>
+    </div>
+
+    <div id="map" class="panel"></div>
+    <div id="preview3d" class="panel"></div>
+  </div>
+  <script>
+    let map, markers = [];
+    let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
+    
+    // ---------- MAP INIT ----------
+    map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      center: [home.lon, home.lat],
+      zoom: 16,
+      pitch: 55,
+      bearing: -20
+    });
+    
+    map.on('load', () => {
       drawHomeLabel();
+      drawHomeMarker();
+      document.getElementById('lat').onchange = document.getElementById('lon').onchange = () => {
+        home.lat = parseFloat(document.getElementById('lat').value);
+        home.lon = parseFloat(document.getElementById('lon').value);
+        drawHomeMarker();
+        drawHomeLabel();
+        updateMarkers();
+      };
+    
+      map.addSource('terrainSource', {
+        type: 'raster-dem',
+        url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+        tileSize: 512,
+        maxzoom: 14
+      });
+      map.setTerrain({ source: 'terrainSource', exaggeration: 2.0 });
+    });
+    
+    function drawHomeLabel() {
+      if (window.homeLabel) homeLabel.remove();
+      const el = document.createElement('div');
+      el.textContent = 'Home';
+      el.style.cssText = `
+        color:white;background:#22c55e;border:1px solid #0b0;
+        border-radius:6px;padding:2px 6px;font-size:11px;
+        position:absolute;transform:translate(-50%,-120%);
+        font-weight:600;
+      `;
+      window.homeLabel = new maplibregl.Marker({ element: el })
+        .setLngLat([home.lon, home.lat])
+        .addTo(map);
+    }
+    
+    function drawHomeMarker(){
+      if (window.homeMarker) homeMarker.remove();
+      const el = document.createElement('div');
+      el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
+      window.homeMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([home.lon, home.lat])
+        .addTo(map);
+    }
+    
+    // ---------- ADD WAYPOINT ----------
+    document.getElementById('addWaypoint').onclick = () => {
+      const idx = markers.length + 1;
+      const tbody = document.querySelector('#wpTable tbody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${idx}</td>
+        <td><input data-k="distance" value="10"></td>
+        <td><input data-k="altitude" value="5"></td>
+        <td><input data-k="heading" value="0"></td>
+        <td><input data-k="speed" value="5"></td>
+        <td class="actions"><button data-del="${idx-1}">✖</button></td>`;
+      tbody.appendChild(tr);
+      bindInputs();
       updateMarkers();
     };
-  
-    map.addSource('terrainSource', {
-      type: 'raster-dem',
-      url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
-      tileSize: 512,
-      maxzoom: 14
-    });
-    map.setTerrain({ source: 'terrainSource', exaggeration: 2.0 });
-  });
-  
-  function drawHomeLabel() {
-    if (window.homeLabel) homeLabel.remove();
-    const el = document.createElement('div');
-    el.textContent = 'Home';
-    el.style.cssText = `
-      color:white;background:#22c55e;border:1px solid #0b0;
-      border-radius:6px;padding:2px 6px;font-size:11px;
-      position:absolute;transform:translate(-50%,-120%);
-      font-weight:600;
-    `;
-    window.homeLabel = new maplibregl.Marker({ element: el })
-      .setLngLat([home.lon, home.lat])
-      .addTo(map);
-  }
-  
-  function drawHomeMarker(){
-    if (window.homeMarker) homeMarker.remove();
-    const el = document.createElement('div');
-    el.style.cssText = 'width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%';
-    window.homeMarker = new maplibregl.Marker({ element: el })
-      .setLngLat([home.lon, home.lat])
-      .addTo(map);
-  }
-  
-  // ---------- ADD WAYPOINT ----------
-  document.getElementById('addWaypoint').onclick = () => {
-    const idx = markers.length + 1;
-    const tbody = document.querySelector('#wpTable tbody');
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${idx}</td>
-      <td><input data-k="distance" value="10"></td>
-      <td><input data-k="altitude" value="5"></td>
-      <td><input data-k="heading" value="0"></td>
-      <td><input data-k="speed" value="5"></td>
-      <td class="actions"><button data-del="${idx-1}">✖</button></td>`;
-    tbody.appendChild(tr);
-    bindInputs();
-    updateMarkers();
-  };
-  
-  function bindInputs(){
-    document.querySelectorAll('#wpTable input[data-k]').forEach(inp=>{
-      inp.onchange = ()=> updateMarkers();
-    });
-    document.querySelectorAll('#wpTable button[data-del]').forEach(btn=>{
-      btn.onclick = ()=>{
-        const i = Number(btn.dataset.del);
-        if(markers[i]) { markers[i].marker.remove(); if(markers[i].label) markers[i].label.remove(); }
-        markers.splice(i,1);
-        renderTable();
+    
+    function bindInputs(){
+      document.querySelectorAll('#wpTable input[data-k]').forEach(inp=>{
+        inp.onchange = ()=> updateMarkers();
+      });
+      document.querySelectorAll('#wpTable button[data-del]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const i = Number(btn.dataset.del);
+          if(markers[i]) { markers[i].marker.remove(); if(markers[i].label) markers[i].label.remove(); }
+          markers.splice(i,1);
+          renderTable();
+        };
+      });
+    }
+    
+    function destination(lat, lon, bearing, dist){
+      const R = 6378137.0;
+      const brg = bearing * Math.PI/180;
+      const dR = dist / R;
+      const lat1 = lat*Math.PI/180, lon1 = lon*Math.PI/180;
+      const lat2 = Math.asin(Math.sin(lat1)*Math.cos(dR)+Math.cos(lat1)*Math.sin(dR)*Math.cos(brg));
+      const lon2 = lon1 + Math.atan2(Math.sin(brg)*Math.sin(dR)*Math.cos(lat1), Math.cos(dR)-Math.sin(lat1)*Math.sin(lat2));
+      return { lat: lat2*180/Math.PI, lon: lon2*180/Math.PI };
+    }
+    
+    // ---------- UPDATE MARKERS ----------
+    function updateMarkers(){
+      markers.forEach(m=>{ m.marker.remove(); if (m.label) m.label.remove(); });
+      markers = [];
+    
+      const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+    
+      document.querySelectorAll('#wpTable tbody tr').forEach((tr,i)=>{
+        const d = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
+        const a = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
+        const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value || 0);
+        const s = parseFloat(tr.querySelector('input[data-k="speed"]').value || 0);
+        const absB = (initBearing + rel) % 360;
+        const coord = destination(home.lat, home.lon, absB, d);
+    
+        // WP marker
+        const el = document.createElement('div');
+        el.style.cssText = 'width:14px;height:14px;background:#3b82f6;border:2px solid #fff;border-radius:50%';
+        const m = new maplibregl.Marker({ element: el, draggable: true })
+          .setLngLat([coord.lon, coord.lat])
+          .addTo(map);
+    
+        // Label
+        const labelEl = document.createElement('div');
+        labelEl.textContent = `${i + 1}`;
+        labelEl.style.cssText = `
+          color:white;background:#0f141c;border:1px solid #444;border-radius:4px;
+          padding:1px 4px;font-size:11px;position:absolute;transform:translate(-50%, -120%);
+          pointer-events:none;
+        `;
+        const label = new maplibregl.Marker({ element: labelEl })
+          .setLngLat([coord.lon, coord.lat])
+          .addTo(map);
+    
+        const wp = { marker: m, label, distance: d, altitude: a, heading: rel, absBearing: absB, speed: s };
+        markers.push(wp);
+      });
+    }
+    
+    // ---------- CLEAR ----------
+    document.getElementById('clearWPs').onclick = ()=>{
+      markers.forEach(w=>{ w.marker.remove(); if (w.label) w.label.remove(); });
+      markers=[];
+      document.querySelector('#wpTable tbody').innerHTML='';
+    };
+    
+    // ---------- CSV GENERATION ----------
+    document.getElementById('generate').onclick = async ()=>{
+      const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+      const payload = {
+        init_lat: parseFloat(document.getElementById('lat').value),
+        init_lon: parseFloat(document.getElementById('lon').value),
+        init_bearing: initBearing,
+        poi_altitude: parseFloat(document.getElementById('poi').value || 1),
+        waypoints: markers.map(w=>({
+          horizontal: w.distance,
+          vertical: w.altitude,
+          bearing: w.heading,
+          hold_time: 0,
+          speed: w.speed
+        }))
       };
-    });
-  }
-  
-  function destination(lat, lon, bearing, dist){
-    const R = 6378137.0;
-    const brg = bearing * Math.PI/180;
-    const dR = dist / R;
-    const lat1 = lat*Math.PI/180, lon1 = lon*Math.PI/180;
-    const lat2 = Math.asin(Math.sin(lat1)*Math.cos(dR)+Math.cos(lat1)*Math.sin(dR)*Math.cos(brg));
-    const lon2 = lon1 + Math.atan2(Math.sin(brg)*Math.sin(dR)*Math.cos(lat1), Math.cos(dR)-Math.sin(lat1)*Math.sin(lat2));
-    return { lat: lat2*180/Math.PI, lon: lon2*180/Math.PI };
-  }
-  
-  // ---------- UPDATE MARKERS ----------
-  function updateMarkers(){
-    markers.forEach(m=>{ m.marker.remove(); if (m.label) m.label.remove(); });
-    markers = [];
-  
-    const initBearing = parseFloat(document.getElementById('bearing').value || 0);
-  
-    document.querySelectorAll('#wpTable tbody tr').forEach((tr,i)=>{
-      const d = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
-      const a = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
-      const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value || 0);
-      const s = parseFloat(tr.querySelector('input[data-k="speed"]').value || 0);
-      const absB = (initBearing + rel) % 360;
-      const coord = destination(home.lat, home.lon, absB, d);
-  
-      // WP marker
-      const el = document.createElement('div');
-      el.style.cssText = 'width:14px;height:14px;background:#3b82f6;border:2px solid #fff;border-radius:50%';
-      const m = new maplibregl.Marker({ element: el, draggable: true })
-        .setLngLat([coord.lon, coord.lat])
-        .addTo(map);
-  
-      // Label
-      const labelEl = document.createElement('div');
-      labelEl.textContent = `${i + 1}`;
-      labelEl.style.cssText = `
-        color:white;background:#0f141c;border:1px solid #444;border-radius:4px;
-        padding:1px 4px;font-size:11px;position:absolute;transform:translate(-50%, -120%);
-        pointer-events:none;
-      `;
-      const label = new maplibregl.Marker({ element: labelEl })
-        .setLngLat([coord.lon, coord.lat])
-        .addTo(map);
-  
-      const wp = { marker: m, label, distance: d, altitude: a, heading: rel, absBearing: absB, speed: s };
-      markers.push(wp);
-    });
-  }
-  
-  // ---------- CLEAR ----------
-  document.getElementById('clearWPs').onclick = ()=>{
-    markers.forEach(w=>{ w.marker.remove(); if (w.label) w.label.remove(); });
-    markers=[];
-    document.querySelector('#wpTable tbody').innerHTML='';
-  };
-  
-  // ---------- CSV GENERATION ----------
-  document.getElementById('generate').onclick = async ()=>{
-    const initBearing = parseFloat(document.getElementById('bearing').value || 0);
-    const payload = {
-      init_lat: parseFloat(document.getElementById('lat').value),
-      init_lon: parseFloat(document.getElementById('lon').value),
-      init_bearing: initBearing,
-      poi_altitude: parseFloat(document.getElementById('poi').value || 1),
-      waypoints: markers.map(w=>({
-        horizontal: w.distance,
-        vertical: w.altitude,
-        bearing: w.heading,
-        hold_time: 0,
-        speed: w.speed
-      }))
+    
+      try {
+        document.getElementById('status').textContent = '⏳ Generating CSV...';
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+    
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+    
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'litchi_waypoints.csv';
+        a.click();
+        document.getElementById('status').textContent = '✅ CSV ready.';
+      } catch (e) {
+        document.getElementById('status').textContent = '❌ ' + e.message;
+      }
     };
-  
-    try {
-      document.getElementById('status').textContent = '⏳ Generating CSV...';
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-  
-      if (!res.ok) throw new Error('Server returned ' + res.status);
-  
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'litchi_waypoints.csv';
-      a.click();
-      document.getElementById('status').textContent = '✅ CSV ready.';
-    } catch (e) {
-      document.getElementById('status').textContent = '❌ ' + e.message;
-    }
-  };
-  
-  // ---------- KML GENERATION ----------
-  document.getElementById('generateKML').onclick = async () => {
-    console.log("KML button clicked");
-  
-    const initBearing = parseFloat(document.getElementById('bearing').value || 0);
-    const payload = {
-      init_lat: parseFloat(document.getElementById('lat').value),
-      init_lon: parseFloat(document.getElementById('lon').value),
-      init_bearing: initBearing,
-      poi_altitude: parseFloat(document.getElementById('poi').value || 1),
-      waypoints: markers.map(w=>({
-        horizontal: w.distance,
-        vertical: w.altitude,
-        bearing: w.heading,
-        speed: w.speed
-      }))
+    
+    // ---------- KML GENERATION ----------
+    document.getElementById('generateKML').onclick = async () => {
+      console.log("KML button clicked");
+    
+      const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+      const payload = {
+        init_lat: parseFloat(document.getElementById('lat').value),
+        init_lon: parseFloat(document.getElementById('lon').value),
+        init_bearing: initBearing,
+        poi_altitude: parseFloat(document.getElementById('poi').value || 1),
+        waypoints: markers.map(w=>({
+          horizontal: w.distance,
+          vertical: w.altitude,
+          bearing: w.heading,
+          speed: w.speed
+        }))
+      };
+    
+      try {
+        document.getElementById('status').textContent = '⏳ Generating KML...';
+    
+        const res = await fetch('/api/generate_kml', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+    
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+    
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'mission_path.kml';
+        a.click();
+    
+        document.getElementById('status').textContent = '✅ KML ready.';
+      } catch (e) {
+        document.getElementById('status').textContent = '❌ ' + e.message;
+      }
     };
-  
-    try {
-      document.getElementById('status').textContent = '⏳ Generating KML...';
-  
-      const res = await fetch('/api/generate_kml', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-  
-      if (!res.ok) throw new Error('Server returned ' + res.status);
-  
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'mission_path.kml';
-      a.click();
-  
-      document.getElementById('status').textContent = '✅ KML ready.';
-    } catch (e) {
-      document.getElementById('status').textContent = '❌ ' + e.message;
-    }
-  };
-  </script>
-  
+    </script>
+    
+</body>
+</html>
