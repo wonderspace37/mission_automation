@@ -134,22 +134,106 @@
         <button class="primary" id="generate">Generate CSV</button>
         <button class="primary" id="generateKML">Generate KML</button>
       </div>
+
       <div class="hr"></div>
       <input type="file" id="csvUpload" accept=".csv" class="ghost" style="padding:8px;">
 
-      
       <div id="status" class="hint"></div>
     </div>
 
     <div id="map" class="panel"></div>
     <div id="preview3d" class="panel"></div>
   </div>
-  
+
   <script>
-    
-    let map, markers = [];
+    let map;
+    let markers = [];
     let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
-    
+
+    // ===== CSV UPLOAD AND AUTO-POPULATE =====
+    document.getElementById("csvUpload").addEventListener("change", function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        const text = evt.target.result;
+        parseUploadedCSV(text);
+      };
+      reader.readAsText(file);
+    });
+
+    function parseUploadedCSV(csvText) {
+      const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
+      if (lines.length < 2) return;
+
+      const header = lines[0].split(",").map(h => h.trim().toLowerCase());
+
+      const idxH = header.indexOf("horizontal");
+      const idxV = header.indexOf("vertical");
+      const idxB = header.indexOf("bearing");
+      const idxS = header.indexOf("speed");
+
+      if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
+        alert("CSV missing required headers: horizontal, vertical, bearing, speed");
+        return;
+      }
+
+      // Clear table + markers
+      markers.forEach(m => m.marker.remove());
+      markers = [];
+      document.querySelector("#wpTable tbody").innerHTML = "";
+
+      const rows = lines.slice(1); // includes WP0 + others
+
+      // ---- WP0: home config only (not a waypoint) ----
+      const wp0Cols = rows[0].split(",");
+      const b0 = parseFloat(wp0Cols[idxB]);
+      if (!Number.isNaN(b0)) {
+        document.getElementById("bearing").value = b0.toFixed(1);
+      }
+      // DO NOT change home.lat/home.lon here; user-provided initial coords are the reference.
+
+      // ---- Add remaining rows as waypoints ----
+      rows.slice(1).forEach(line => {
+        const cols = line.split(",");
+        if (cols.length === 0 || !cols[0].trim()) return;
+
+        const dist = parseFloat(cols[idxH]);
+        const alt  = parseFloat(cols[idxV]);
+        const hdg  = parseFloat(cols[idxB]);
+        const spd  = parseFloat(cols[idxS]);
+
+        addCSVRowToTable(
+          Number.isNaN(dist) ? 0 : dist,
+          Number.isNaN(alt)  ? 5 : alt,
+          Number.isNaN(hdg)  ? 0 : hdg,
+          Number.isNaN(spd)  ? 5 : spd
+        );
+      });
+
+      updateMarkers();
+      document.getElementById("status").textContent = "✅ CSV loaded into planner.";
+    }
+
+    function addCSVRowToTable(distance, altitude, heading, speed) {
+      const tbody = document.querySelector("#wpTable tbody");
+      const idx = tbody.children.length + 1;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${idx}</td>
+        <td><input data-k="distance" value="${distance}"></td>
+        <td><input data-k="altitude" value="${altitude}"></td>
+        <td><input data-k="heading" value="${heading}"></td>
+        <td><input data-k="speed" value="${speed}"></td>
+        <td class="actions"><button data-del="${idx - 1}">✖</button></td>
+      `;
+
+      tbody.appendChild(tr);
+      bindInputs();
+    }
+
     // ---------- MAP INIT ----------
     map = new maplibregl.Map({
       container: 'map',
@@ -159,7 +243,7 @@
       pitch: 55,
       bearing: -20
     });
-    
+
     map.on('load', () => {
       drawHomeLabel();
       drawHomeMarker();
@@ -170,7 +254,7 @@
         drawHomeLabel();
         updateMarkers();
       };
-    
+
       map.addSource('terrainSource', {
         type: 'raster-dem',
         url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
@@ -179,7 +263,7 @@
       });
       map.setTerrain({ source: 'terrainSource', exaggeration: 2.0 });
     });
-    
+
     function drawHomeLabel() {
       if (window.homeLabel) homeLabel.remove();
       const el = document.createElement('div');
@@ -194,7 +278,7 @@
         .setLngLat([home.lon, home.lat])
         .addTo(map);
     }
-    
+
     function drawHomeMarker(){
       if (window.homeMarker) homeMarker.remove();
       const el = document.createElement('div');
@@ -203,11 +287,11 @@
         .setLngLat([home.lon, home.lat])
         .addTo(map);
     }
-    
+
     // ---------- ADD WAYPOINT ----------
     document.getElementById('addWaypoint').onclick = () => {
-      const idx = markers.length + 1;
       const tbody = document.querySelector('#wpTable tbody');
+      const idx = tbody.children.length + 1;
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${idx}</td>
@@ -220,21 +304,26 @@
       bindInputs();
       updateMarkers();
     };
-    
+
     function bindInputs(){
       document.querySelectorAll('#wpTable input[data-k]').forEach(inp=>{
         inp.onchange = ()=> updateMarkers();
       });
       document.querySelectorAll('#wpTable button[data-del]').forEach(btn=>{
         btn.onclick = ()=>{
-          const i = Number(btn.dataset.del);
-          if(markers[i]) { markers[i].marker.remove(); if(markers[i].label) markers[i].label.remove(); }
-          markers.splice(i,1);
-          renderTable();
+          const row = btn.closest("tr");
+          if (!row) return;
+          const index = Array.from(row.parentNode.children).indexOf(row);
+          if (markers[index]) {
+            markers[index].marker.remove();
+            if (markers[index].label) markers[index].label.remove();
+          }
+          row.remove();
+          updateMarkers();
         };
       });
     }
-    
+
     function destination(lat, lon, bearing, dist){
       const R = 6378137.0;
       const brg = bearing * Math.PI/180;
@@ -244,29 +333,30 @@
       const lon2 = lon1 + Math.atan2(Math.sin(brg)*Math.sin(dR)*Math.cos(lat1), Math.cos(dR)-Math.sin(lat1)*Math.sin(lat2));
       return { lat: lat2*180/Math.PI, lon: lon2*180/Math.PI };
     }
-    
+
     // ---------- UPDATE MARKERS ----------
     function updateMarkers(){
+      if (!map) return;
       markers.forEach(m=>{ m.marker.remove(); if (m.label) m.label.remove(); });
       markers = [];
-    
+
       const initBearing = parseFloat(document.getElementById('bearing').value || 0);
-    
+
       document.querySelectorAll('#wpTable tbody tr').forEach((tr,i)=>{
         const d = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
         const a = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
         const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value || 0);
         const s = parseFloat(tr.querySelector('input[data-k="speed"]').value || 0);
-        const absB = (initBearing + rel) % 360;
+        const absB = (initBearing + rel + 360) % 360;
         const coord = destination(home.lat, home.lon, absB, d);
-    
+
         // WP marker
         const el = document.createElement('div');
         el.style.cssText = 'width:14px;height:14px;background:#3b82f6;border:2px solid #fff;border-radius:50%';
-        const m = new maplibregl.Marker({ element: el, draggable: true })
+        const m = new maplibregl.Marker({ element: el, draggable: false })
           .setLngLat([coord.lon, coord.lat])
           .addTo(map);
-    
+
         // Label
         const labelEl = document.createElement('div');
         labelEl.textContent = `${i + 1}`;
@@ -278,19 +368,152 @@
         const label = new maplibregl.Marker({ element: labelEl })
           .setLngLat([coord.lon, coord.lat])
           .addTo(map);
-    
+
         const wp = { marker: m, label, distance: d, altitude: a, heading: rel, absBearing: absB, speed: s };
         markers.push(wp);
       });
     }
-    
+
     // ---------- CLEAR ----------
     document.getElementById('clearWPs').onclick = ()=>{
       markers.forEach(w=>{ w.marker.remove(); if (w.label) w.label.remove(); });
       markers=[];
       document.querySelector('#wpTable tbody').innerHTML='';
+      document.getElementById('status').textContent = '';
     };
-    
+
+    // ---------- 3D PREVIEW ----------
+    let scene, camera, renderer, animationId;
+    const ALT_SCALE = 10;
+    initThree();
+
+    function initThree() {
+      const container = document.getElementById('preview3d');
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      container.innerHTML = '';
+      container.appendChild(renderer.domElement);
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0b0d12);
+
+      camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 2000);
+      camera.position.set(0, -300, 200);
+
+      const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+      sun.position.set(200, -150, 300);
+      sun.castShadow = true;
+      sun.shadow.mapSize.width = 2048;
+      sun.shadow.mapSize.height = 2048;
+      scene.add(sun);
+      scene.add(new THREE.AmbientLight(0x404040, 1.2));
+
+      const grid = new THREE.GridHelper(800, 80, 0x3b82f6, 0x444);
+      grid.material.opacity = 0.25;
+      grid.material.transparent = true;
+      scene.add(grid);
+
+      window.addEventListener('resize', () => {
+        const w = container.clientWidth, h = container.clientHeight;
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+      });
+    }
+
+    function buildPreviewGeometry() {
+      for (let i = scene.children.length - 1; i >= 0; i--) {
+        const obj = scene.children[i];
+        if (obj.userData && (obj.userData.path || obj.userData.wpSphere)) scene.remove(obj);
+      }
+
+      const initBearing = parseFloat(document.getElementById('bearing').value || 0);
+      const pts = [{ lat: home.lat, lon: home.lon, alt: 5 }];
+
+      document.querySelectorAll('#wpTable tbody tr').forEach(tr => {
+        const d   = parseFloat(tr.querySelector('input[data-k="distance"]').value || 0);
+        const rel = parseFloat(tr.querySelector('input[data-k="heading"]').value  || 0);
+        const alt = parseFloat(tr.querySelector('input[data-k="altitude"]').value || 2);
+        const absB = (initBearing + rel + 360) % 360;
+        const dest = destination(home.lat, home.lon, absB, d);
+        pts.push({ lat: dest.lat, lon: dest.lon, alt });
+      });
+
+      if (pts.length < 2) return null;
+
+      const ref = pts[0];
+      const toXY = (p) => {
+        const e = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([p.lon, ref.lat]), { units: 'kilometers' }) * 1000;
+        const n = turf.distance(turf.point([ref.lon, ref.lat]), turf.point([ref.lon, p.lat]), { units: 'kilometers' }) * 1000;
+        return [(p.lon >= ref.lon ? e : -e), (p.lat >= ref.lat ? n : -n)];
+      };
+
+      const positions = [];
+      pts.forEach(p => {
+        const [x, y] = toXY(p);
+        positions.push(x, y, p.alt * ALT_SCALE);
+      });
+
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x3b82f6 }));
+      line.userData.path = true;
+      scene.add(line);
+
+      pts.forEach((p, i) => {
+        const [x, y] = toXY(p);
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(3, 24, 18),
+          new THREE.MeshStandardMaterial({ color: i === 0 ? 0x22c55e : 0xffffff, roughness: 0.6, metalness: 0.3 })
+        );
+        sphere.position.set(x, y, p.alt * ALT_SCALE);
+        sphere.castShadow = true;
+        sphere.receiveShadow = true;
+        sphere.userData.wpSphere = true;
+        scene.add(sphere);
+      });
+
+      renderer.render(scene, camera);
+      return { positions: new Float32Array(positions) };
+    }
+
+    document.getElementById('preview3s').onclick = () => {
+      const built = buildPreviewGeometry();
+      if (!built) return;
+
+      const { positions } = built;
+      const drone = new THREE.Mesh(new THREE.SphereGeometry(3, 24, 18), new THREE.MeshStandardMaterial({ color: 0x9ecbff }));
+      drone.userData.wpSphere = true;
+      scene.add(drone);
+
+      const total = positions.length / 3;
+      const duration = 3000;
+      const start = performance.now();
+
+      if (animationId) cancelAnimationFrame(animationId);
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / duration);
+        const idxF = t * (total - 1);
+        const i = Math.floor(idxF);
+        const a = idxF - i;
+
+        const i3 = i * 3;
+        const nx = positions[i3]     * (1 - a) + positions[i3 + 3] * a;
+        const ny = positions[i3 + 1] * (1 - a) + positions[i3 + 4] * a;
+        const nz = positions[i3 + 2] * (1 - a) + positions[i3 + 5] * a;
+
+        drone.position.set(nx, ny, nz);
+        camera.lookAt(drone.position);
+        renderer.render(scene, camera);
+
+        if (t < 1) animationId = requestAnimationFrame(step);
+      };
+      animationId = requestAnimationFrame(step);
+    };
+
     // ---------- CSV GENERATION ----------
     document.getElementById('generate').onclick = async ()=>{
       const initBearing = parseFloat(document.getElementById('bearing').value || 0);
@@ -307,7 +530,7 @@
           speed: w.speed
         }))
       };
-    
+
       try {
         document.getElementById('status').textContent = '⏳ Generating CSV...';
         const res = await fetch('/api/generate', {
@@ -315,9 +538,9 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload)
         });
-    
+
         if (!res.ok) throw new Error('Server returned ' + res.status);
-    
+
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -328,11 +551,9 @@
         document.getElementById('status').textContent = '❌ ' + e.message;
       }
     };
-    
+
     // ---------- KML GENERATION ----------
     document.getElementById('generateKML').onclick = async () => {
-      console.log("KML button clicked");
-    
       const initBearing = parseFloat(document.getElementById('bearing').value || 0);
       const payload = {
         init_lat: parseFloat(document.getElementById('lat').value),
@@ -346,112 +567,29 @@
           speed: w.speed
         }))
       };
-    
+
       try {
         document.getElementById('status').textContent = '⏳ Generating KML...';
-    
+
         const res = await fetch('/api/generate_kml', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload)
         });
-    
+
         if (!res.ok) throw new Error('Server returned ' + res.status);
-    
+
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'mission_path.kml';
         a.click();
-    
+
         document.getElementById('status').textContent = '✅ KML ready.';
       } catch (e) {
         document.getElementById('status').textContent = '❌ ' + e.message;
       }
     };
-    // ===== CSV UPLOAD AND AUTO-POPULATE =====
-document.getElementById("csvUpload").addEventListener("change", function (e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function (evt) {
-        const text = evt.target.result;
-        parseUploadedCSV(text);
-    };
-    reader.readAsText(file);
-});
-
-function parseUploadedCSV(csvText) {
-    const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
-    const header = lines[0].split(",").map(h => h.trim().toLowerCase());
-
-    const idxH = header.indexOf("horizontal");
-    const idxV = header.indexOf("vertical");
-    const idxB = header.indexOf("heading");
-    const idxS = header.indexOf("speed");
-
-    if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
-        alert("CSV missing required headers: horizontal, vertical, heading, speed");
-        return;
-    }
-
-    // Clear table + markers
-    markers.forEach(m => m.marker.remove());
-    markers = [];
-    document.querySelector("#wpTable tbody").innerHTML = "";
-
-    const rows = lines.slice(1);
-    if (rows.length === 0) return;
-
-    // ---- WP0 SPECIAL ----
-    const wp0 = rows[0].split(",");
-    const h0 = parseFloat(wp0[idxH]);
-    const b0 = parseFloat(wp0[idxB]);
-
-    // WP0 sets home lat/lon
-    home.lat = home.lat + (h0 / 111320);
-    home.lon = home.lon + ((b0 / 111320) / Math.cos(home.lat * Math.PI / 180));
-
-    document.getElementById("lat").value = home.lat.toFixed(8);
-    document.getElementById("lon").value = home.lon.toFixed(8);
-
-    drawHomeMarker();
-    drawHomeLabel();
-
-    // ---- Add remaining rows ----
-    rows.slice(1).forEach((line) => {
-        const cols = line.split(",");
-        const dist = parseFloat(cols[idxH]);
-        const alt = parseFloat(cols[idxV]);
-        const hdg = parseFloat(cols[idxB]);
-        const spd = parseFloat(cols[idxS]);
-
-        addCSVRowToTable(dist, alt, hdg, spd);
-    });
-
-    updateMarkers();
-}
-
-function addCSVRowToTable(distance, altitude, heading, speed) {
-    const tbody = document.querySelector("#wpTable tbody");
-    const idx = tbody.children.length + 1;
-
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-        <td>${idx}</td>
-        <td><input data-k="distance" value="${distance}"></td>
-        <td><input data-k="altitude" value="${altitude}"></td>
-        <td><input data-k="heading" value="${heading}"></td>
-        <td><input data-k="speed" value="${speed}"></td>
-        <td class="actions"><button data-del="${idx - 1}">✖</button></td>
-    `;
-
-    tbody.appendChild(tr);
-    bindInputs();
-}
-
-    </script>
-    
+  </script>
 </body>
 </html>
