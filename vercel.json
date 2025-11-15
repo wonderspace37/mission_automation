@@ -2,7 +2,7 @@
     "version": 2,
     "builds": [
         {
-            "src": "index.py",
+            "src": "api/*.py",
             "use": "@vercel/python"
         },
         {
@@ -12,8 +12,12 @@
     ],
     "routes": [
         {
-            "src": "/api/(.*)",
-            "dest": "/index.py"
+            "src": "/api/generate",
+            "dest": "/api/generate_csv.py"
+        },
+        {
+            "src": "/api/generate_kml",
+            "dest": "/api/generate_kml.py"
         },
         {
             "src": "/(.*)",

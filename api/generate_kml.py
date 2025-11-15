@@ -1,16 +1,14 @@
-# api/generate_kml.py
-from flask import Blueprint, request, Response, jsonify
+import json
 import math
-
-generate_kml_bp = Blueprint("generate_kml", __name__)
 
 EARTH_RADIUS = 6378137.0
 
-def destination_point(lat, lon, bearing, distance):
+
+def destination_point(lat, lon, bearing, distance_m):
     lat1 = math.radians(lat)
     lon1 = math.radians(lon)
     brg = math.radians(bearing)
-    d = distance / EARTH_RADIUS
+    d = distance_m / EARTH_RADIUS
 
     lat2 = math.asin(
         math.sin(lat1) * math.cos(d) +
@@ -24,37 +22,33 @@ def destination_point(lat, lon, bearing, distance):
     return math.degrees(lat2), math.degrees(lon2)
 
 
-@generate_kml_bp.post("/api/generate_kml")
-def generate_kml():
+def handler(request):
+    """Serverless KML generator — NO FLASK"""
     try:
-        data = request.get_json(force=True)
+        data = json.loads(request.body or "{}")
 
         init_lat = float(data["init_lat"])
         init_lon = float(data["init_lon"])
         init_bearing = float(data["init_bearing"])
-        waypoints = data["waypoints"]
+        waypoints = data.get("waypoints", [])
 
-        coords = []
-        coords.append((init_lon, init_lat, 5))  # Home WP0
+        coords = [(init_lon, init_lat, 5)]  # Home WP0
 
-        # All waypoints absolute from HOME
         for wp in waypoints:
             horiz = float(wp["horizontal"])
             vert = float(wp["vertical"])
-            rel_bearing = float(wp["bearing"])
+            rel_brg = float(wp["bearing"])
 
-            abs_brg = (init_bearing + rel_bearing) % 360
-            new_lat, new_lon = destination_point(init_lat, init_lon, abs_brg, horiz)
+            abs_brg = (init_bearing + rel_brg) % 360
+            lat2, lon2 = destination_point(init_lat, init_lon, abs_brg, horiz)
+            coords.append((lon2, lat2, vert))
 
-            coords.append((new_lon, new_lat, vert))
-
-        # --- Build XML (NO SPACES BEFORE XML HEADER) ---
+        # Build XML — no leading spaces before header
         xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
         xml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
         xml += '<Document>\n'
         xml += '  <name>Mission Path</name>\n'
         xml += '  <Style id="pathStyle"><LineStyle><color>ff00aaff</color><width>4</width></LineStyle></Style>\n'
-
         xml += '  <Placemark><name>Flight Path</name><styleUrl>#pathStyle</styleUrl>\n'
         xml += '    <LineString><tessellate>1</tessellate><altitudeMode>absolute</altitudeMode><coordinates>\n'
 
@@ -63,14 +57,20 @@ def generate_kml():
 
         xml += '    </coordinates></LineString></Placemark>\n'
 
-        # Individual place markers
         for i, (lon, lat, alt) in enumerate(coords):
             name = "Home" if i == 0 else f"WP {i}"
             xml += f'  <Placemark><name>{name}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>\n'
 
         xml += '</Document></kml>'
 
-        return Response(xml, mimetype="application/vnd.google-earth.kml+xml")
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/vnd.google-earth.kml+xml",
+                "Content-Disposition": "attachment; filename=mission_path.kml"
+            },
+            "body": xml
+        }
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return {"statusCode": 500, "body": str(e)}
