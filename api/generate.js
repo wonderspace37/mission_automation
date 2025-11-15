@@ -1,31 +1,26 @@
-// api/generate.js
-export default async function handler(req, res) {
+export default function handler(req, res) {
     try {
-        console.log("📩 /api/generate called");
-
         if (req.method !== "POST") {
-            res.status(405).send("❌ Only POST allowed");
+            res.status(405).send("Only POST allowed");
             return;
         }
 
-        const {
-            init_lat,
-            init_lon,
-            init_bearing,
-            poi_altitude,
-            waypoints
-        } = req.body || {};
+        const { init_lat, init_lon, init_bearing, waypoints } = req.body || {};
 
         if (!Array.isArray(waypoints)) {
             res.status(400).send("❌ Missing or invalid waypoints array");
             return;
         }
 
+        const homeLat = Number(init_lat);
+        const homeLon = Number(init_lon);
+        const baseBearing = Number(init_bearing) || 0;
+
         const EARTH_RADIUS = 6378137.0;
 
-        function destinationPoint(lat, lon, bearingDeg, distanceMeters) {
-            const br = (bearingDeg * Math.PI) / 180;
-            const dR = distanceMeters / EARTH_RADIUS;
+        function destinationPoint(lat, lon, brDeg, dist) {
+            const br = (brDeg * Math.PI) / 180;
+            const dR = dist / EARTH_RADIUS;
 
             const lat1 = (lat * Math.PI) / 180;
             const lon1 = (lon * Math.PI) / 180;
@@ -33,8 +28,7 @@ export default async function handler(req, res) {
             const sinLat1 = Math.sin(lat1);
             const cosLat1 = Math.cos(lat1);
 
-            const sinLat2 =
-                sinLat1 * Math.cos(dR) + cosLat1 * Math.sin(dR) * Math.cos(br);
+            const sinLat2 = sinLat1 * Math.cos(dR) + cosLat1 * Math.sin(dR) * Math.cos(br);
             const lat2 = Math.asin(sinLat2);
 
             const y = Math.sin(br) * Math.sin(dR) * cosLat1;
@@ -47,107 +41,66 @@ export default async function handler(req, res) {
             };
         }
 
-        const homeLat = Number(init_lat);
-        const homeLon = Number(init_lon);
-        const baseBearing = Number(init_bearing) || 0;
-        const poiAlt = Number(poi_altitude ?? 1);
+        // clean coords
+        const coords = [];
 
-        if (!Number.isFinite(homeLat) || !Number.isFinite(homeLon)) {
-            res.status(400).send("❌ Invalid init_lat or init_lon");
-            return;
-        }
+        // Home first
+        coords.push([homeLon, homeLat, 5]);
 
-        // Litchi header
-        const header = [
-            "latitude",
-            "longitude",
-            "altitude(m)",
-            "heading(deg)",
-            "curvesize(m)",
-            "rotationdir",
-            "gimbalmode",
-            "gimbalpitchangle",
-            "altitudemode",
-            "speed(m/s)",
-            "poi_latitude",
-            "poi_longitude",
-            "poi_altitude(m)",
-            "poi_altitudemode",
-            "photo_timeinterval",
-            "photo_distinterval",
-        ];
+        // Skip waypoint index 0 ALWAYS (home row)
+        waypoints.forEach((wp, idx) => {
+            if (idx === 0) return; // skip CSV home row
 
-        const rows = [];
-        const curveSize = 0.0;
-        const rotationDir = 0;
-        const gimbalMode = 0;
-        const gimbalPitchAngle = 0;
-        const altitudeMode = 0;
-        const poiAltitudeMode = 0;
-        const photoTimeInterval = -1;
-        const photoDistInterval = -1;
+            const horizontal = Number(wp.horizontal) || 0;
+            const vertical = Number(wp.vertical) || 5;
+            const relBearing = Number(wp.bearing) || 0;
 
-        // ---- WP0: Home (included) ----
-        const wp0Speed = 5.0; // fixed speed for WP0 as you requested
-        rows.push([
-            homeLat.toFixed(8),
-            homeLon.toFixed(8),
-            (5.0).toFixed(2),                  // altitude for WP0
-            baseBearing.toFixed(2),            // heading
-            curveSize.toFixed(2),
-            rotationDir,
-            gimbalMode,
-            gimbalPitchAngle,
-            altitudeMode,
-            wp0Speed.toFixed(2),
-            homeLat.toFixed(8),                // poi_latitude
-            homeLon.toFixed(8),                // poi_longitude
-            poiAlt.toFixed(2),                 // poi_altitude
-            poiAltitudeMode,
-            photoTimeInterval,
-            photoDistInterval,
-        ]);
-
-        // ---- Remaining waypoints: ABSOLUTE FROM HOME ----
-        for (const wp of waypoints) {
-            const horizontal = Math.max(0, Number(wp.horizontal || 0));
-            const relBearing = Number(wp.bearing || 0);
             const absBearing = ((baseBearing + relBearing) % 360 + 360) % 360;
-            const alt = Math.max(2, Number(wp.vertical || 2));
-            const speed = Number(wp.speed || 0);
 
             const { lat, lon } = destinationPoint(homeLat, homeLon, absBearing, horizontal);
 
-            rows.push([
-                lat.toFixed(8),
-                lon.toFixed(8),
-                alt.toFixed(2),
-                absBearing.toFixed(2),
-                curveSize.toFixed(2),
-                rotationDir,
-                gimbalMode,
-                gimbalPitchAngle,
-                altitudeMode,
-                speed.toFixed(2),
-                homeLat.toFixed(8),
-                homeLon.toFixed(8),
-                poiAlt.toFixed(2),
-                poiAltitudeMode,
-                photoTimeInterval,
-                photoDistInterval,
-            ]);
-        }
+            coords.push([lon, lat, vertical]);
+        });
 
-        const csv = [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
+        // Build XML manually (NO TEMPLATE WHITESPACE)
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        xml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n';
+        xml += '<Document>\n';
+        xml += '  <name>Mission Path</name>\n';
+        xml += '  <Style id="pathStyle">\n';
+        xml += '    <LineStyle><color>ff00aaff</color><width>4</width></LineStyle>\n';
+        xml += '  </Style>\n';
+        xml += '  <Placemark>\n';
+        xml += '    <name>Flight Path</name>\n';
+        xml += '    <styleUrl>#pathStyle</styleUrl>\n';
+        xml += '    <LineString>\n';
+        xml += '      <tessellate>1</tessellate>\n';
+        xml += '      <altitudeMode>absolute</altitudeMode>\n';
+        xml += '      <coordinates>\n';
 
-        res.setHeader("Content-Type", "text/csv");
-        res.setHeader(
-            "Content-Disposition",
-            "attachment; filename=litchi_waypoints.csv"
-        );
-        res.status(200).send(csv);
+        coords.forEach(([lon, lat, alt]) => {
+            xml += `        ${lon},${lat},${alt}\n`;
+        });
+
+        xml += '      </coordinates>\n';
+        xml += '    </LineString>\n';
+        xml += '  </Placemark>\n';
+
+        // Individual WPs
+        xml += `  <Placemark><name>Home</name><Point><coordinates>${coords[0][0]},${coords[0][1]},${coords[0][2]}</coordinates></Point></Placemark>\n`;
+
+        coords.slice(1).forEach(([lon, lat, alt], i) => {
+            xml += `  <Placemark><name>WP ${i + 1}</name><Point><coordinates>${lon},${lat},${alt}</coordinates></Point></Placemark>\n`;
+        });
+
+        xml += '</Document>\n';
+        xml += '</kml>';
+
+        res.setHeader("Content-Type", "application/vnd.google-earth.kml+xml");
+        res.setHeader("Content-Disposition", "attachment; filename=mission_path.kml");
+        res.status(200).send(xml);
+
     } catch (err) {
-        console.error("🔥 generate.js crashed:", err);
-        res.status(500).send("❌ Internal error: " + err.message);
+        res.status(500).json({ error: String(err) });
     }
 }
