@@ -2,7 +2,7 @@ from flask import Flask, request, send_file, jsonify
 import io
 import csv
 from math import radians, degrees, sin, cos, asin, atan2
-from api.temp_generate_kml import generate_kml_bp
+from api.generate_kml import generate_kml_bp
 
 app = Flask(__name__)
 app.register_blueprint(generate_kml_bp)
