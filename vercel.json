@@ -6,7 +6,7 @@
             "use": "@vercel/python"
         },
         {
-            "src": "api/**/*.py",
+            "src": "api/*.py",
             "use": "@vercel/python"
         },
         {
@@ -16,16 +16,12 @@
     ],
     "routes": [
         {
-            "src": "/api/(.*)",
-            "dest": "/api/$1.py"
-        },
-        {
             "src": "/api/generate",
             "dest": "/index.py"
         },
         {
             "src": "/api/generate_kml",
-            "dest": "/index.py"
+            "dest": "/api/generate_kml.py"
         },
         {
             "src": "/(.*)",

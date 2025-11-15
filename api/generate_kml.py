@@ -1,3 +1,4 @@
+# api/generate_kml.py
 from flask import Blueprint, request, Response, jsonify
 import math
 
@@ -5,22 +6,22 @@ generate_kml_bp = Blueprint("generate_kml", __name__)
 
 EARTH_RADIUS = 6378137.0
 
-def destination_point(lat, lon, bearing, distance_m):
+def destination_point(lat, lon, bearing, distance):
     lat1 = math.radians(lat)
     lon1 = math.radians(lon)
     brg = math.radians(bearing)
-    d_div_r = distance_m / EARTH_RADIUS
+    d = distance / EARTH_RADIUS
 
     lat2 = math.asin(
-        math.sin(lat1) * math.cos(d_div_r)
-        + math.cos(lat1) * math.sin(d_div_r) * math.cos(brg)
+        math.sin(lat1) * math.cos(d) +
+        math.cos(lat1) * math.sin(d) * math.cos(brg)
     )
     lon2 = lon1 + math.atan2(
-        math.sin(brg) * math.sin(d_div_r) * math.cos(lat1),
-        math.cos(d_div_r) - math.sin(lat1) * math.sin(lat2)
+        math.sin(brg) * math.sin(d) * math.cos(lat1),
+        math.cos(d) - math.sin(lat1) * math.sin(lat2)
     )
 
-    return (math.degrees(lat2), math.degrees(lon2))
+    return math.degrees(lat2), math.degrees(lon2)
 
 
 @generate_kml_bp.post("/api/generate_kml")
@@ -30,69 +31,46 @@ def generate_kml():
 
         init_lat = float(data["init_lat"])
         init_lon = float(data["init_lon"])
-        init_bearing = float(data.get("init_bearing", 0))
-        waypoints = data.get("waypoints", [])
+        init_bearing = float(data["init_bearing"])
+        waypoints = data["waypoints"]
 
         coords = []
+        coords.append((init_lon, init_lat, 5))  # Home WP0
 
-        # HOME → one time only
-        coords.append((init_lon, init_lat, 5))
-
-        # SKIP WP0 because it is home row in uploaded CSV
-        for i, wp in enumerate(waypoints):
-            if i == 0:
-                continue
-
+        # All waypoints absolute from HOME
+        for wp in waypoints:
             horiz = float(wp["horizontal"])
             vert = float(wp["vertical"])
-            rel_brg = float(wp["bearing"])
+            rel_bearing = float(wp["bearing"])
 
-            abs_brg = (init_bearing + rel_brg) % 360
+            abs_brg = (init_bearing + rel_bearing) % 360
             new_lat, new_lon = destination_point(init_lat, init_lon, abs_brg, horiz)
 
             coords.append((new_lon, new_lat, vert))
 
-        xml_lines = [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<kml xmlns="http://www.opengis.net/kml/2.2">',
-            '<Document>',
-            '  <name>Mission Path</name>',
-            '  <Style id="pathStyle">',
-            '    <LineStyle>',
-            '      <color>ff00aaff</color>',
-            '      <width>4</width>',
-            '    </LineStyle>',
-            '  </Style>',
-            '  <Placemark>',
-            '    <name>Flight Path</name>',
-            '    <styleUrl>#pathStyle</styleUrl>',
-            '    <LineString>',
-            '      <tessellate>1</tessellate>',
-            '      <altitudeMode>absolute</altitudeMode>',
-            '      <coordinates>'
-        ]
+        # --- Build XML (NO SPACES BEFORE XML HEADER) ---
+        xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        xml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
+        xml += '<Document>\n'
+        xml += '  <name>Mission Path</name>\n'
+        xml += '  <Style id="pathStyle"><LineStyle><color>ff00aaff</color><width>4</width></LineStyle></Style>\n'
 
-        # Write coordinates
+        xml += '  <Placemark><name>Flight Path</name><styleUrl>#pathStyle</styleUrl>\n'
+        xml += '    <LineString><tessellate>1</tessellate><altitudeMode>absolute</altitudeMode><coordinates>\n'
+
         for lon, lat, alt in coords:
-            xml_lines.append(f'        {lon},{lat},{alt}')
+            xml += f"      {lon},{lat},{alt}\n"
 
-        xml_lines += [
-            '      </coordinates>',
-            '    </LineString>',
-            '  </Placemark>',
-            f'  <Placemark><name>Home</name><Point><coordinates>{coords[0][0]},{coords[0][1]},{coords[0][2]}</coordinates></Point></Placemark>'
-        ]
+        xml += '    </coordinates></LineString></Placemark>\n'
 
-        # Individual WPs
-        for i, (lon, lat, alt) in enumerate(coords[1:], start=1):
-            xml_lines.append(
-                f'  <Placemark><name>WP {i}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>'
-            )
+        # Individual place markers
+        for i, (lon, lat, alt) in enumerate(coords):
+            name = "Home" if i == 0 else f"WP {i}"
+            xml += f'  <Placemark><name>{name}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>\n'
 
-        xml_lines += ['</Document>', '</kml>']
-        xml_text = "\n".join(xml_lines)
+        xml += '</Document></kml>'
 
-        return Response(xml_text, mimetype="application/vnd.google-earth.kml+xml")
+        return Response(xml, mimetype="application/vnd.google-earth.kml+xml")
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e)}), 500
