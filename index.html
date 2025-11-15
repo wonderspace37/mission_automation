@@ -151,88 +151,117 @@
     let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
 
     // ===== CSV UPLOAD AND AUTO-POPULATE =====
-    document.getElementById("csvUpload").addEventListener("change", function (e) {
-      const file = e.target.files[0];
-      if (!file) return;
+document.getElementById("csvUpload").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = function (evt) {
+    const reader = new FileReader();
+    reader.onload = function (evt) {
         const text = evt.target.result;
         parseUploadedCSV(text);
-      };
-      reader.readAsText(file);
-    });
+    };
+    reader.readAsText(file);
+});
 
-    function parseUploadedCSV(csvText) {
-      const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
-      if (lines.length < 2) return;
+function normalizeHeader(h) {
+    return h.replace(/\s+/g, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
 
-      const header = lines[0].split(",").map(h => h.trim().toLowerCase());
+function parseUploadedCSV(csvText) {
+    // Split lines, remove empty ones
+    const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
+    if (lines.length < 2) return;
 
-      const idxH = header.indexOf("horizontal");
-      const idxV = header.indexOf("vertical");
-      const idxB = header.indexOf("bearing");
-      const idxS = header.indexOf("speed");
+    // Detect delimiter (tab or comma)
+    const delimiter = lines[0].includes("\t") ? "\t" : ",";
 
-      if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
-        alert("CSV missing required headers: horizontal, vertical, bearing, speed");
-        return;
-      }
+    // Normalize and lower-case header
+    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
 
-      // Clear table + markers
-      markers.forEach(m => m.marker.remove());
-      markers = [];
-      document.querySelector("#wpTable tbody").innerHTML = "";
-
-      const rows = lines.slice(1); // includes WP0 + others
-
-      // ---- WP0: home config only (not a waypoint) ----
-      const wp0Cols = rows[0].split(",");
-      const b0 = parseFloat(wp0Cols[idxB]);
-      if (!Number.isNaN(b0)) {
-        document.getElementById("bearing").value = b0.toFixed(1);
-      }
-      // DO NOT change home.lat/home.lon here; user-provided initial coords are the reference.
-
-      // ---- Add remaining rows as waypoints ----
-      rows.slice(1).forEach(line => {
-        const cols = line.split(",");
-        if (cols.length === 0 || !cols[0].trim()) return;
-
-        const dist = parseFloat(cols[idxH]);
-        const alt  = parseFloat(cols[idxV]);
-        const hdg  = parseFloat(cols[idxB]);
-        const spd  = parseFloat(cols[idxS]);
-
-        addCSVRowToTable(
-          Number.isNaN(dist) ? 0 : dist,
-          Number.isNaN(alt)  ? 5 : alt,
-          Number.isNaN(hdg)  ? 0 : hdg,
-          Number.isNaN(spd)  ? 5 : spd
-        );
-      });
-
-      updateMarkers();
-      document.getElementById("status").textContent = "✅ CSV loaded into planner.";
+    function findHeader(possibleNames) {
+        for (const name of possibleNames) {
+            const idx = headers.indexOf(name.toLowerCase());
+            if (idx !== -1) return idx;
+        }
+        return -1;
     }
 
-    function addCSVRowToTable(distance, altitude, heading, speed) {
-      const tbody = document.querySelector("#wpTable tbody");
-      const idx = tbody.children.length + 1;
+    // Support your exact format:
+    const idxH = findHeader(["horizontal"]);
+    const idxV = findHeader(["vertical"]);
+    const idxB = findHeader(["heading"]);
+    const idxS = findHeader(["speed"]);
 
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
+    if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
+        alert(`CSV missing required columns.
+Found: ${headers.join(", ")}
+Expected: Horizontal, Vertical, Heading, Speed`);
+        return;
+    }
+
+    // Reset current markers + table
+    markers.forEach(m => m.marker.remove());
+    markers = [];
+    document.querySelector("#wpTable tbody").innerHTML = "";
+
+    const rows = lines.slice(1);
+    if (rows.length === 0) return;
+
+    // ===========================
+    //  WP0 → HOME LOCATION ONLY
+    // ===========================
+    const wp0 = rows[0].split(delimiter).map(x => x.trim());
+
+    const h0 = parseFloat(wp0[idxH]) || 0;
+    const b0 = parseFloat(wp0[idxB]) || 0;
+
+    // LATITUDE SHIFT FOR HORIZONTAL
+    home.lat = home.lat + (h0 / 111320.0);
+
+    // LONGITUDE SHIFT BASED ON BEARING VALUE IN WP0
+    home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
+
+    document.getElementById("lat").value = home.lat.toFixed(8);
+    document.getElementById("lon").value = home.lon.toFixed(8);
+
+    drawHomeLabel();
+    drawHomeMarker();
+
+    // ===========================
+    //  Remaining WP rows → table
+    // ===========================
+    rows.slice(1).forEach((line, i) => {
+        const cols = line.split(delimiter).map(x => x.trim());
+
+        const dist = parseFloat(cols[idxH]) || 0;
+        const alt = parseFloat(cols[idxV]) || 0;
+        const hdg = parseFloat(cols[idxB]) || 0;
+        const spd = parseFloat(cols[idxS]) || 0;
+
+        addCSVRowToTable(dist, alt, hdg, spd);
+    });
+
+    updateMarkers();
+}
+
+
+function addCSVRowToTable(distance, altitude, heading, speed) {
+    const tbody = document.querySelector("#wpTable tbody");
+    const idx = tbody.children.length + 1;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
         <td>${idx}</td>
         <td><input data-k="distance" value="${distance}"></td>
         <td><input data-k="altitude" value="${altitude}"></td>
         <td><input data-k="heading" value="${heading}"></td>
         <td><input data-k="speed" value="${speed}"></td>
         <td class="actions"><button data-del="${idx - 1}">✖</button></td>
-      `;
+    `;
+    tbody.appendChild(tr);
+    bindInputs();
+}
 
-      tbody.appendChild(tr);
-      bindInputs();
-    }
 
     // ---------- MAP INIT ----------
     map = new maplibregl.Map({
