@@ -134,6 +134,9 @@
         <button class="primary" id="generate">Generate CSV</button>
         <button class="primary" id="generateKML">Generate KML</button>
       </div>
+      <div class="hr"></div>
+      <input type="file" id="csvUpload" accept=".csv" class="ghost" style="padding:8px;">
+
       
       <div id="status" class="hint"></div>
     </div>
@@ -141,7 +144,9 @@
     <div id="map" class="panel"></div>
     <div id="preview3d" class="panel"></div>
   </div>
+  
   <script>
+    
     let map, markers = [];
     let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
     
@@ -364,6 +369,88 @@
         document.getElementById('status').textContent = '❌ ' + e.message;
       }
     };
+    // ===== CSV UPLOAD AND AUTO-POPULATE =====
+document.getElementById("csvUpload").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function (evt) {
+        const text = evt.target.result;
+        parseUploadedCSV(text);
+    };
+    reader.readAsText(file);
+});
+
+function parseUploadedCSV(csvText) {
+    const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
+    const header = lines[0].split(",").map(h => h.trim().toLowerCase());
+
+    const idxH = header.indexOf("horizontal");
+    const idxV = header.indexOf("vertical");
+    const idxB = header.indexOf("heading");
+    const idxS = header.indexOf("speed");
+
+    if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
+        alert("CSV missing required headers: horizontal, vertical, heading, speed");
+        return;
+    }
+
+    // Clear table + markers
+    markers.forEach(m => m.marker.remove());
+    markers = [];
+    document.querySelector("#wpTable tbody").innerHTML = "";
+
+    const rows = lines.slice(1);
+    if (rows.length === 0) return;
+
+    // ---- WP0 SPECIAL ----
+    const wp0 = rows[0].split(",");
+    const h0 = parseFloat(wp0[idxH]);
+    const b0 = parseFloat(wp0[idxB]);
+
+    // WP0 sets home lat/lon
+    home.lat = home.lat + (h0 / 111320);
+    home.lon = home.lon + ((b0 / 111320) / Math.cos(home.lat * Math.PI / 180));
+
+    document.getElementById("lat").value = home.lat.toFixed(8);
+    document.getElementById("lon").value = home.lon.toFixed(8);
+
+    drawHomeMarker();
+    drawHomeLabel();
+
+    // ---- Add remaining rows ----
+    rows.slice(1).forEach((line) => {
+        const cols = line.split(",");
+        const dist = parseFloat(cols[idxH]);
+        const alt = parseFloat(cols[idxV]);
+        const hdg = parseFloat(cols[idxB]);
+        const spd = parseFloat(cols[idxS]);
+
+        addCSVRowToTable(dist, alt, hdg, spd);
+    });
+
+    updateMarkers();
+}
+
+function addCSVRowToTable(distance, altitude, heading, speed) {
+    const tbody = document.querySelector("#wpTable tbody");
+    const idx = tbody.children.length + 1;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+        <td>${idx}</td>
+        <td><input data-k="distance" value="${distance}"></td>
+        <td><input data-k="altitude" value="${altitude}"></td>
+        <td><input data-k="heading" value="${heading}"></td>
+        <td><input data-k="speed" value="${speed}"></td>
+        <td class="actions"><button data-del="${idx - 1}">✖</button></td>
+    `;
+
+    tbody.appendChild(tr);
+    bindInputs();
+}
+
     </script>
     
 </body>
