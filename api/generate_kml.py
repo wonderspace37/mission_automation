@@ -33,11 +33,11 @@ def generate_kml():
         init_bearing = float(data.get("init_bearing", 0))
         waypoints = data.get("waypoints", [])
 
-        # ----- ABSOLUTE COORDINATES FROM HOME -----
+        # ----- ABSOLUTE COORDINATES (ALWAYS FROM HOME) -----
         coords = []
 
-        # Only ONE home coordinate used (NO duplication)
-        coords.append((init_lon, init_lat, 5))  
+        # ONLY ONE home coordinate added
+        coords.append((init_lon, init_lat, 5))
 
         for wp in waypoints:
             horiz = float(wp["horizontal"])
@@ -45,12 +45,11 @@ def generate_kml():
             rel_brg = float(wp["bearing"])
 
             abs_brg = (init_bearing + rel_brg) % 360
-            nlat, nlon = destination_point(init_lat, init_lon, abs_brg, horiz)
+            new_lat, new_lon = destination_point(init_lat, init_lon, abs_brg, horiz)
+            coords.append((new_lon, new_lat, vert))
 
-            coords.append((nlon, nlat, vert))
-
-        # ----- BUILD CLEAN KML WITH ZERO LEADING WHITESPACE -----
-        lines = [
+        # ----- CLEAN XML (NO LEADING NEWLINES, NO SPACES) -----
+        xml_lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<kml xmlns="http://www.opengis.net/kml/2.2">',
             '<Document>',
@@ -71,28 +70,27 @@ def generate_kml():
         ]
 
         for lon, lat, alt in coords:
-            lines.append(f"        {lon},{lat},{alt}")
+            xml_lines.append(f'        {lon},{lat},{alt}')
 
-        lines += [
+        xml_lines += [
             '      </coordinates>',
             '    </LineString>',
             '  </Placemark>',
+            f'  <Placemark><name>Home</name><Point><coordinates>{coords[0][0]},{coords[0][1]},{coords[0][2]}</coordinates></Point></Placemark>'
         ]
 
-        # Add waypoint markers
-        lines.append(f'  <Placemark><name>Home</name><Point><coordinates>{coords[0][0]},{coords[0][1]},{coords[0][2]}</coordinates></Point></Placemark>')
-
-        for idx, (lon, lat, alt) in enumerate(coords[1:], start=1):
-            lines.append(
-                f'  <Placemark><name>WP {idx}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>'
+        # Add individual marked WPs
+        for i, (lon, lat, alt) in enumerate(coords[1:], start=1):
+            xml_lines.append(
+                f'  <Placemark><name>WP {i}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>'
             )
 
-        lines += [
+        xml_lines += [
             '</Document>',
             '</kml>'
         ]
 
-        xml_text = "\n".join(lines)
+        xml_text = "\n".join(xml_lines)
 
         return Response(xml_text, mimetype="application/vnd.google-earth.kml+xml")
 
