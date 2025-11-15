@@ -2,8 +2,12 @@
     "version": 2,
     "builds": [
         {
-            "src": "api/**/*.js",
-            "use": "@vercel/node"
+            "src": "index.py",
+            "use": "@vercel/python"
+        },
+        {
+            "src": "api/**/*.py",
+            "use": "@vercel/python"
         },
         {
             "src": "index.html",
@@ -13,7 +17,15 @@
     "routes": [
         {
             "src": "/api/(.*)",
-            "dest": "/api/$1.js"
+            "dest": "/api/$1.py"
+        },
+        {
+            "src": "/api/generate",
+            "dest": "/index.py"
+        },
+        {
+            "src": "/api/generate_kml",
+            "dest": "/index.py"
         },
         {
             "src": "/(.*)",

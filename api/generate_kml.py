@@ -33,22 +33,25 @@ def generate_kml():
         init_bearing = float(data.get("init_bearing", 0))
         waypoints = data.get("waypoints", [])
 
-        # ----- ABSOLUTE COORDINATES (ALWAYS FROM HOME) -----
         coords = []
 
-        # ONLY ONE home coordinate added
+        # HOME → one time only
         coords.append((init_lon, init_lat, 5))
 
-        for wp in waypoints:
+        # SKIP WP0 because it is home row in uploaded CSV
+        for i, wp in enumerate(waypoints):
+            if i == 0:
+                continue
+
             horiz = float(wp["horizontal"])
             vert = float(wp["vertical"])
             rel_brg = float(wp["bearing"])
 
             abs_brg = (init_bearing + rel_brg) % 360
             new_lat, new_lon = destination_point(init_lat, init_lon, abs_brg, horiz)
+
             coords.append((new_lon, new_lat, vert))
 
-        # ----- CLEAN XML (NO LEADING NEWLINES, NO SPACES) -----
         xml_lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<kml xmlns="http://www.opengis.net/kml/2.2">',
@@ -69,6 +72,7 @@ def generate_kml():
             '      <coordinates>'
         ]
 
+        # Write coordinates
         for lon, lat, alt in coords:
             xml_lines.append(f'        {lon},{lat},{alt}')
 
@@ -79,17 +83,13 @@ def generate_kml():
             f'  <Placemark><name>Home</name><Point><coordinates>{coords[0][0]},{coords[0][1]},{coords[0][2]}</coordinates></Point></Placemark>'
         ]
 
-        # Add individual marked WPs
+        # Individual WPs
         for i, (lon, lat, alt) in enumerate(coords[1:], start=1):
             xml_lines.append(
                 f'  <Placemark><name>WP {i}</name><Point><coordinates>{lon},{lat},{alt}</coordinates></Point></Placemark>'
             )
 
-        xml_lines += [
-            '</Document>',
-            '</kml>'
-        ]
-
+        xml_lines += ['</Document>', '</kml>']
         xml_text = "\n".join(xml_lines)
 
         return Response(xml_text, mimetype="application/vnd.google-earth.kml+xml")

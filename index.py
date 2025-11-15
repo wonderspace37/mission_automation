@@ -1,15 +1,25 @@
+# index.py
 from flask import Flask, request, send_file, jsonify
 import io
 import csv
 from math import radians, degrees, sin, cos, asin, atan2
+
+# Import both API blueprints
 from api.generate_kml import generate_kml_bp
+from api.generate_csv import generate_csv_bp
 
 app = Flask(__name__)
+
+# Register API route blueprints
 app.register_blueprint(generate_kml_bp)
+app.register_blueprint(generate_csv_bp)
 
 EARTH_RADIUS = 6378137.0
 
 
+# ===============================
+# HELPER: Great-circle destination
+# ===============================
 def destination_point(lat, lon, bearing, distance_m):
     lat1 = radians(lat)
     lon1 = radians(lon)
@@ -29,6 +39,9 @@ def destination_point(lat, lon, bearing, distance_m):
     return degrees(lat2), degrees(lon2)
 
 
+# ===============================
+#  LITCHI CSV GENERATION
+# ===============================
 @app.post("/api/generate")
 def generate_csv():
     """
@@ -37,13 +50,13 @@ def generate_csv():
     try:
         payload = request.get_json(force=True)
 
-        init_lat = float(payload.get("init_lat"))
-        init_lon = float(payload.get("init_lon"))
+        init_lat = float(payload["init_lat"])
+        init_lon = float(payload["init_lon"])
         init_bearing = float(payload.get("init_bearing", 0.0))
         poi_altitude = float(payload.get("poi_altitude", 1.0))
         rel_wps = payload.get("waypoints", []) or []
 
-        # Constant metadata
+        # Static metadata for Litchi
         curve_size = 0
         rotationdir = 0
         gimbalmode = 0
@@ -59,7 +72,7 @@ def generate_csv():
         points = []
         curr_lat, curr_lon = init_lat, init_lon
 
-        # WP0
+        # WP0 - Home
         points.append({
             "lat": curr_lat,
             "lon": curr_lon,
@@ -68,7 +81,7 @@ def generate_csv():
             "speed": 0.0
         })
 
-        # Subsequent WPs
+        # Generate waypoints relative to HOME (absolute coordinates)
         for seg in rel_wps:
             horiz = max(0.0, float(seg.get("horizontal", 0.0)))
             rel_brg = float(seg.get("bearing", 0.0))
@@ -88,15 +101,15 @@ def generate_csv():
 
             curr_lat, curr_lon = next_lat, next_lon
 
-        # Write CSV
+        # Output CSV
         out = io.StringIO(newline="")
         writer = csv.writer(out)
 
         writer.writerow([
-            "latitude", "longitude", "altitude(m)", "heading(deg)", "curvesize(m)",
-            "rotationdir", "gimbalmode", "gimbalpitchangle", "altitudemode",
-            "speed(m/s)", "poi_latitude", "poi_longitude", "poi_altitude(m)",
-            "poi_altitudemode", "photo_timeinterval", "photo_distinterval"
+            "latitude", "longitude", "altitude(m)", "heading(deg)",
+            "curvesize(m)", "rotationdir", "gimbalmode", "gimbalpitchangle",
+            "altitudemode", "speed(m/s)", "poi_latitude", "poi_longitude",
+            "poi_altitude(m)", "poi_altitudemode", "photo_timeinterval", "photo_distinterval"
         ])
 
         for p in points:
@@ -133,5 +146,8 @@ def generate_csv():
         return jsonify({"error": str(e)}), 400
 
 
+# ===============================
+#  LOCAL DEV ENTRY POINT
+# ===============================
 if __name__ == "__main__":
-    app.run()
+    app.run(host="0.0.0.0", port=5000)
