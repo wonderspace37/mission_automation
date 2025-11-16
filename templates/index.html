@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mission Automation • Relative Waypoint Generator</title>
+
+  <link rel="stylesheet" href="/static/styles.css" />
+
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+</head>
+
+<body>
+  <header>
+    <img src="/static/logo.svg" class="logo" />
+    <h1>Mission Automation</h1>
+    <p class="subtitle">Generate Relative Waypoints, CSV & KML Instantly</p>
+  </header>
+
+  <main class="container">
+    <!-- Left Panel -->
+    <section class="panel">
+      <h2>Waypoint Parameters</h2>
+
+      <label>Latitude</label>
+      <input id="lat" type="number" step="0.000001">
+
+      <label>Longitude</label>
+      <input id="lon" type="number" step="0.000001">
+
+      <label>Bearing (deg)</label>
+      <input id="bearing" type="number" value="0" min="0" max="360">
+
+      <label>Distance (meters)</label>
+      <input id="distance" type="number" value="30">
+
+      <button id="addPoint" class="btn">Add Waypoint</button>
+
+      <hr />
+
+      <button id="generateCSV" class="btn success">Download CSV</button>
+      <button id="generateKML" class="btn outline">Download KML</button>
+    </section>
+
+    <!-- Right Panel -->
+    <section class="map-panel">
+      <div id="map"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

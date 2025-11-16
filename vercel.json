@@ -1,27 +1,22 @@
 {
-    "version": 2,
     "builds": [
         {
-            "src": "api/*.py",
+            "src": "api/index.py",
             "use": "@vercel/python"
-        },
-        {
-            "src": "index.html",
-            "use": "@vercel/static"
         }
     ],
     "routes": [
         {
-            "src": "/api/generate",
-            "dest": "/api/generate_csv.py"
+            "src": "/api/(.*)",
+            "dest": "api/index.py"
         },
         {
-            "src": "/api/generate_kml",
-            "dest": "/api/generate_kml.py"
+            "src": "/static/(.*)",
+            "dest": "/static/$1"
         },
         {
             "src": "/(.*)",
-            "dest": "/index.html"
+            "dest": "api/index.py"
         }
     ]
 }
