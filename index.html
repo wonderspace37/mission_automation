@@ -167,6 +167,12 @@ function normalizeHeader(h) {
     return h.replace(/\s+/g, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+// ===== REPLACE THE ENTIRE parseUploadedCSV FUNCTION IN index.html =====
+// Find the function starting around line 174 and replace it with this:
+
+// ===== REPLACE THE ENTIRE parseUploadedCSV FUNCTION IN index.html =====
+// Find the function starting around line 174 and replace it with this:
+
 function parseUploadedCSV(csvText) {
     // Split lines, remove empty ones
     const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
@@ -208,21 +214,21 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     if (rows.length === 0) return;
 
     // ===========================
-    //  WP0 → HOME LOCATION ONLY
+    //  WP0 → UPDATE UI FIELDS (ABSOLUTE COORDINATES)
     // ===========================
     const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-    const h0 = parseFloat(wp0[idxH]) || 0;
-    const b0 = parseFloat(wp0[idxB]) || 0;
+    const wp0_horizontal = parseFloat(wp0[idxH]) || 0; // This is latitude
+    const wp0_vertical = parseFloat(wp0[idxV]) || 0;   // This is longitude
+    const wp0_heading = parseFloat(wp0[idxB]) || 0;    // This is initial bearing
 
-    // LATITUDE SHIFT FOR HORIZONTAL
-    home.lat = home.lat + (h0 / 111320.0);
+    // WP0 contains absolute GPS coordinates
+    document.getElementById("lat").value = wp0_horizontal.toFixed(8);  // horizontal = latitude
+    document.getElementById("lon").value = wp0_vertical.toFixed(8);    // vertical = longitude  
+    document.getElementById("bearing").value = wp0_heading.toFixed(2); // heading = initial bearing
 
-    // LONGITUDE SHIFT BASED ON BEARING VALUE IN WP0
-    home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
-
-    document.getElementById("lat").value = home.lat.toFixed(8);
-    document.getElementById("lon").value = home.lon.toFixed(8);
+    home.lat = wp0_horizontal;
+    home.lon = wp0_vertical;
 
     drawHomeLabel();
     drawHomeMarker();
