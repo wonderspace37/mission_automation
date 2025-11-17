@@ -209,35 +209,27 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     const rows = lines.slice(1);
     if (rows.length === 0) return;
 
-    // ===========================
-//  WP0 → HOME LOCATION + INITIAL HEADING
 // ===========================
-// ===========================
-//  WP0 → HOME LOCATION + INITIAL HEADING
+//  WP0 → DIRECT ABSOLUTE VALUES FROM CSV
 // ===========================
 const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-const h0 = parseFloat(wp0[idxH]) || 0;   // Horizontal
-const b0 = parseFloat(wp0[idxB]) || 0;   // Heading
-const v0 = parseFloat(wp0[idxV]) || 0;   // Vertical = initial UI bearing
+const wp0_lat  = parseFloat(wp0[idxH]) || 0;  // Horizontal = ABSOLUTE LAT
+const wp0_lon  = parseFloat(wp0[idxB]) || 0;  // Heading    = ABSOLUTE LON
+const wp0_bear = parseFloat(wp0[idxV]) || 0;  // Vertical   = INITIAL BEARING
 
-// RESET HOME BEFORE APPLYING OFFSETS  (THIS FIXES THE DRIFT)
-home.lat = originalHome.lat;
-home.lon = originalHome.lon;
+// Set home location directly (NO OFFSET MATH!)
+home.lat = wp0_lat;
+home.lon = wp0_lon;
 
-// Apply WP0 offsets
-home.lat = home.lat + (h0 / 111320.0);
-home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
+// Update UI fields
+document.getElementById("lat").value     = wp0_lat.toFixed(8);
+document.getElementById("lon").value     = wp0_lon.toFixed(8);
+document.getElementById("bearing").value = wp0_bear.toFixed(2);
 
-// Set initial bearing from Vertical
-document.getElementById("bearing").value = v0.toFixed(2);
-
-// Update UI
-document.getElementById("lat").value = home.lat.toFixed(8);
-document.getElementById("lon").value = home.lon.toFixed(8);
-
-drawHomeLabel();
+// Redraw map markers
 drawHomeMarker();
+drawHomeLabel();
 
 
 
