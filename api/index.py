@@ -1,7 +1,38 @@
+from flask import Flask, request, send_file, jsonify
+import io
+import csv
+from math import radians, degrees, sin, cos, asin, atan2
+from api.temp_generate_kml import generate_kml_bp
+
+app = Flask(__name__)
+app.register_blueprint(generate_kml_bp)
+
+EARTH_RADIUS = 6378137.0
+
+
+def destination_point(lat, lon, bearing, distance_m):
+    lat1 = radians(lat)
+    lon1 = radians(lon)
+    brg = radians(bearing)
+    d_div_r = distance_m / EARTH_RADIUS
+
+    lat2 = asin(
+        sin(lat1) * cos(d_div_r)
+        + cos(lat1) * sin(d_div_r) * cos(brg)
+    )
+
+    lon2 = lon1 + atan2(
+        sin(brg) * sin(d_div_r) * cos(lat1),
+        cos(d_div_r) - sin(lat1) * sin(lat2)
+    )
+
+    return degrees(lat2), degrees(lon2)
+
+
 @app.post("/api/generate")
 def generate_csv():
     """
-    Generate CSV with strict Litchi format + constant columns.
+    Generates a Litchi-compatible waypoint CSV.
     """
     try:
         payload = request.get_json(force=True)
@@ -10,10 +41,9 @@ def generate_csv():
         init_lon = float(payload.get("init_lon"))
         init_bearing = float(payload.get("init_bearing", 0.0))
         poi_altitude = float(payload.get("poi_altitude", 1.0))
-
         rel_wps = payload.get("waypoints", []) or []
 
-        # ---------------- Constants ----------------
+        # Constant metadata
         curve_size = 0
         rotationdir = 0
         gimbalmode = 0
@@ -25,12 +55,11 @@ def generate_csv():
         photo_timeinterval = -1
         photo_distinterval = -1
 
-        # -------------------------------------------
-
+        # Build waypoint list
         points = []
         curr_lat, curr_lon = init_lat, init_lon
 
-        # Home waypoint (WP0)
+        # WP0
         points.append({
             "lat": curr_lat,
             "lon": curr_lon,
@@ -39,13 +68,16 @@ def generate_csv():
             "speed": 0.0
         })
 
+        # Subsequent WPs
         for seg in rel_wps:
             horiz = max(0.0, float(seg.get("horizontal", 0.0)))
             rel_brg = float(seg.get("bearing", 0.0))
             abs_brg = (init_bearing + rel_brg) % 360
+
             next_lat, next_lon = destination_point(curr_lat, curr_lon, abs_brg, horiz)
             next_alt = max(2.0, float(seg.get("vertical", 2.0)))
             speed = float(seg.get("speed", 0.0))
+
             points.append({
                 "lat": next_lat,
                 "lon": next_lon,
@@ -53,20 +85,22 @@ def generate_csv():
                 "bearing": abs_brg,
                 "speed": speed
             })
+
             curr_lat, curr_lon = next_lat, next_lon
 
         # Write CSV
         out = io.StringIO(newline="")
         writer = csv.writer(out)
+
         writer.writerow([
-            "latitude","longitude","altitude(m)","heading(deg)","curvesize(m)",
-            "rotationdir","gimbalmode","gimbalpitchangle","altitudemode",
-            "speed(m/s)","poi_latitude","poi_longitude","poi_altitude(m)",
-            "poi_altitudemode","photo_timeinterval","photo_distinterval"
+            "latitude", "longitude", "altitude(m)", "heading(deg)", "curvesize(m)",
+            "rotationdir", "gimbalmode", "gimbalpitchangle", "altitudemode",
+            "speed(m/s)", "poi_latitude", "poi_longitude", "poi_altitude(m)",
+            "poi_altitudemode", "photo_timeinterval", "photo_distinterval"
         ])
 
         for p in points:
-            row = [
+            writer.writerow([
                 f"{p['lat']:.8f}",
                 f"{p['lon']:.8f}",
                 f"{p['alt']:.2f}",
@@ -83,14 +117,21 @@ def generate_csv():
                 poi_altitudemode,
                 photo_timeinterval,
                 photo_distinterval
-            ]
-            writer.writerow(row)
+            ])
 
         mem = io.BytesIO(out.getvalue().encode("utf-8-sig"))
         mem.seek(0)
-        return send_file(mem, mimetype="text/csv",
-                         as_attachment=True,
-                         download_name="litchi_waypoints.csv")
+
+        return send_file(
+            mem,
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="litchi_waypoints.csv"
+        )
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+if __name__ == "__main__":
+    app.run()
