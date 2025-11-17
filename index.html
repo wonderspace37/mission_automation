@@ -208,24 +208,33 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     if (rows.length === 0) return;
 
     // ===========================
-    //  WP0 → HOME LOCATION ONLY
-    // ===========================
-    const wp0 = rows[0].split(delimiter).map(x => x.trim());
+//  WP0 → DIRECT ABSOLUTE HOME VALUES
+// ===========================
+const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-    const h0 = parseFloat(wp0[idxH]) || 0;
-    const b0 = parseFloat(wp0[idxB]) || 0;
+// WP0 mapping:
+// Horizontal → latitude
+// Heading    → longitude
+// Vertical   → initial bearing
 
-    // LATITUDE SHIFT FOR HORIZONTAL
-    home.lat = home.lat + (h0 / 111320.0);
+const wp0_lat  = parseFloat(wp0[idxH]) || 0;
+const wp0_lon  = parseFloat(wp0[idxB]) || 0;
+const wp0_bear = parseFloat(wp0[idxV]) || 0;
 
-    // LONGITUDE SHIFT BASED ON BEARING VALUE IN WP0
-    home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
+// Set home to EXACT CSV values
+home.lat = wp0_lat;
+home.lon = wp0_lon;
 
-    document.getElementById("lat").value = home.lat.toFixed(8);
-    document.getElementById("lon").value = home.lon.toFixed(8);
+// Put WP0 values into correct UI fields
+document.getElementById("lat").value = wp0_lat.toFixed(8);
+document.getElementById("lon").value = wp0_lon.toFixed(8);
+document.getElementById("bearing").value = wp0_bear.toFixed(2);
 
-    drawHomeLabel();
-    drawHomeMarker();
+
+// Redraw home
+drawHomeMarker();
+drawHomeLabel();
+
 
     // ===========================
     //  Remaining WP rows → table
