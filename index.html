@@ -208,24 +208,30 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     if (rows.length === 0) return;
 
     // ===========================
-    //  WP0 → HOME LOCATION ONLY
-    // ===========================
-    const wp0 = rows[0].split(delimiter).map(x => x.trim());
+//  WP0 → HOME LOCATION + INITIAL HEADING
+// ===========================
+const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-    const h0 = parseFloat(wp0[idxH]) || 0;
-    const b0 = parseFloat(wp0[idxB]) || 0;
+const h0 = parseFloat(wp0[idxH]) || 0;   // Horizontal
+const b0 = parseFloat(wp0[idxB]) || 0;   // Heading
+const v0 = parseFloat(wp0[idxV]) || 0;   // NEW → Vertical = initial UI bearing
 
-    // LATITUDE SHIFT FOR HORIZONTAL
-    home.lat = home.lat + (h0 / 111320.0);
+// Horizontal changes LAT
+home.lat = home.lat + (h0 / 111320.0);
 
-    // LONGITUDE SHIFT BASED ON BEARING VALUE IN WP0
-    home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
+// Heading changes LON
+home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
 
-    document.getElementById("lat").value = home.lat.toFixed(8);
-    document.getElementById("lon").value = home.lon.toFixed(8);
+// NEW → Vertical for WP0 sets initial bearing field
+document.getElementById("bearing").value = v0.toFixed(2);
 
-    drawHomeLabel();
-    drawHomeMarker();
+// Update UI fields
+document.getElementById("lat").value = home.lat.toFixed(8);
+document.getElementById("lon").value = home.lon.toFixed(8);
+
+drawHomeLabel();
+drawHomeMarker();
+
 
     // ===========================
     //  Remaining WP rows → table
