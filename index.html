@@ -167,9 +167,8 @@ function normalizeHeader(h) {
     return h.replace(/\s+/g, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
-// ===== REPLACE THE ENTIRE parseUploadedCSV FUNCTION IN index.html =====
-// Find the function starting around line 174 and replace it with this:
 
+// Find the function starting around line 174 and replace it with this:
 // ===== REPLACE THE ENTIRE parseUploadedCSV FUNCTION IN index.html =====
 // Find the function starting around line 174 and replace it with this:
 
@@ -181,8 +180,10 @@ function parseUploadedCSV(csvText) {
     // Detect delimiter (tab or comma)
     const delimiter = lines[0].includes("\t") ? "\t" : ",";
 
-    // Normalize and lower-case header
+    // Parse header - your CSV has: Waypoint,Heading,Horizontal,Vertical,Path,Poi,Intervals,Speed
     const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+
+    console.log("CSV Headers found:", headers);
 
     function findHeader(possibleNames) {
         for (const name of possibleNames) {
@@ -192,16 +193,18 @@ function parseUploadedCSV(csvText) {
         return -1;
     }
 
-    // Support your exact format:
-    const idxH = findHeader(["horizontal"]);
-    const idxV = findHeader(["vertical"]);
-    const idxB = findHeader(["heading"]);
-    const idxS = findHeader(["speed"]);
+    // Map columns from your CSV format
+    const idxHeading = findHeader(["heading", "hdg"]);
+    const idxHorizontal = findHeader(["horizontal", "horiz"]);
+    const idxVertical = findHeader(["vertical", "vert", "altitude", "alt"]);
+    const idxSpeed = findHeader(["speed", "spd"]);
 
-    if (idxH < 0 || idxV < 0 || idxB < 0 || idxS < 0) {
+    console.log("Column indices - Heading:", idxHeading, "Horizontal:", idxHorizontal, "Vertical:", idxVertical, "Speed:", idxSpeed);
+
+    if (idxHeading < 0 || idxHorizontal < 0 || idxVertical < 0 || idxSpeed < 0) {
         alert(`CSV missing required columns.
 Found: ${headers.join(", ")}
-Expected: Horizontal, Vertical, Heading, Speed`);
+Expected: Heading, Horizontal, Vertical, Speed`);
         return;
     }
 
@@ -214,40 +217,51 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     if (rows.length === 0) return;
 
     // ===========================
-    //  WP0 → UPDATE UI FIELDS (ABSOLUTE COORDINATES)
+    //  WP0 → HOME POINT (ABSOLUTE GPS COORDINATES)
     // ===========================
     const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-    const wp0_horizontal = parseFloat(wp0[idxH]) || 0; // This is latitude
-    const wp0_vertical = parseFloat(wp0[idxV]) || 0;   // This is longitude
-    const wp0_heading = parseFloat(wp0[idxB]) || 0;    // This is initial bearing
+    // In your CSV: WP0 has Heading=latitude, Horizontal=longitude, Vertical=altitude
+    const wp0_lat = parseFloat(wp0[idxHeading]) || 0;        // Heading column = Latitude
+    const wp0_lon = parseFloat(wp0[idxHorizontal]) || 0;     // Horizontal column = Longitude
+    const wp0_alt = parseFloat(wp0[idxVertical]) || 0;       // Vertical column = Initial bearing (0 in your case)
 
-    // WP0 contains absolute GPS coordinates
-    document.getElementById("lat").value = wp0_horizontal.toFixed(8);  // horizontal = latitude
-    document.getElementById("lon").value = wp0_vertical.toFixed(8);    // vertical = longitude  
-    document.getElementById("bearing").value = wp0_heading.toFixed(2); // heading = initial bearing
+    console.log("WP0 parsed - Lat:", wp0_lat, "Lon:", wp0_lon, "Alt/Bearing:", wp0_alt);
 
-    home.lat = wp0_horizontal;
-    home.lon = wp0_vertical;
+    // Update UI fields
+    document.getElementById("lat").value = wp0_lat.toFixed(8);
+    document.getElementById("lon").value = wp0_lon.toFixed(8);
+    document.getElementById("bearing").value = wp0_alt.toFixed(2);  // Initial bearing
+    document.getElementById("poi").value = "1";  // Default POI altitude
+
+    home.lat = wp0_lat;
+    home.lon = wp0_lon;
 
     drawHomeLabel();
     drawHomeMarker();
 
     // ===========================
-    //  Remaining WP rows → table
+    //  Remaining WP rows → RELATIVE WAYPOINTS
     // ===========================
     rows.slice(1).forEach((line, i) => {
         const cols = line.split(delimiter).map(x => x.trim());
 
-        const dist = parseFloat(cols[idxH]) || 0;
-        const alt = parseFloat(cols[idxV]) || 0;
-        const hdg = parseFloat(cols[idxB]) || 0;
-        const spd = parseFloat(cols[idxS]) || 0;
+        // In your CSV: Heading=relative bearing, Horizontal=distance, Vertical=altitude
+        const relHeading = parseFloat(cols[idxHeading]) || 0;     // Relative bearing
+        const distance = parseFloat(cols[idxHorizontal]) || 0;    // Distance in meters
+        const altitude = parseFloat(cols[idxVertical]) || 0;      // Altitude in meters
+        const speed = parseFloat(cols[idxSpeed]) || 0;            // Speed m/s
 
-        addCSVRowToTable(dist, alt, hdg, spd);
+        console.log(`WP${i+1} - Heading: ${relHeading}°, Distance: ${distance}m, Alt: ${altitude}m, Speed: ${speed}m/s`);
+
+        // Only add if distance is specified
+        if (distance > 0 || altitude > 0) {
+            addCSVRowToTable(distance, altitude, relHeading, speed);
+        }
     });
 
     updateMarkers();
+    document.getElementById('status').textContent = `✅ Loaded ${rows.length - 1} waypoints from CSV`;
 }
 
 
