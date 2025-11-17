@@ -149,6 +149,8 @@
     let map;
     let markers = [];
     let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
+    let originalHome = { lat: 37.526643, lon: -121.966697, alt: 5};
+
 
     // ===== CSV UPLOAD AND AUTO-POPULATE =====
 document.getElementById("csvUpload").addEventListener("change", function (e) {
@@ -210,27 +212,33 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     // ===========================
 //  WP0 → HOME LOCATION + INITIAL HEADING
 // ===========================
+// ===========================
+//  WP0 → HOME LOCATION + INITIAL HEADING
+// ===========================
 const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
 const h0 = parseFloat(wp0[idxH]) || 0;   // Horizontal
 const b0 = parseFloat(wp0[idxB]) || 0;   // Heading
-const v0 = parseFloat(wp0[idxV]) || 0;   // NEW → Vertical = initial UI bearing
+const v0 = parseFloat(wp0[idxV]) || 0;   // Vertical = initial UI bearing
 
-// Horizontal changes LAT
+// RESET HOME BEFORE APPLYING OFFSETS  (THIS FIXES THE DRIFT)
+home.lat = originalHome.lat;
+home.lon = originalHome.lon;
+
+// Apply WP0 offsets
 home.lat = home.lat + (h0 / 111320.0);
-
-// Heading changes LON
 home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
 
-// NEW → Vertical for WP0 sets initial bearing field
+// Set initial bearing from Vertical
 document.getElementById("bearing").value = v0.toFixed(2);
 
-// Update UI fields
+// Update UI
 document.getElementById("lat").value = home.lat.toFixed(8);
 document.getElementById("lon").value = home.lon.toFixed(8);
 
 drawHomeLabel();
 drawHomeMarker();
+
 
 
     // ===========================
