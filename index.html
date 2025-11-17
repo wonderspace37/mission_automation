@@ -149,8 +149,6 @@
     let map;
     let markers = [];
     let home = { lat: 37.526643, lon: -121.966697, alt: 5 };
-    let originalHome = { lat: 37.526643, lon: -121.966697, alt: 5};
-
 
     // ===== CSV UPLOAD AND AUTO-POPULATE =====
 document.getElementById("csvUpload").addEventListener("change", function (e) {
@@ -209,29 +207,25 @@ Expected: Horizontal, Vertical, Heading, Speed`);
     const rows = lines.slice(1);
     if (rows.length === 0) return;
 
-// ===========================
-//  WP0 → DIRECT ABSOLUTE VALUES FROM CSV
-// ===========================
-const wp0 = rows[0].split(delimiter).map(x => x.trim());
+    // ===========================
+    //  WP0 → HOME LOCATION ONLY
+    // ===========================
+    const wp0 = rows[0].split(delimiter).map(x => x.trim());
 
-const wp0_lat  = parseFloat(wp0[idxH]) || 0;  // Horizontal = ABSOLUTE LAT
-const wp0_lon  = parseFloat(wp0[idxB]) || 0;  // Heading    = ABSOLUTE LON
-const wp0_bear = parseFloat(wp0[idxV]) || 0;  // Vertical   = INITIAL BEARING
+    const h0 = parseFloat(wp0[idxH]) || 0;
+    const b0 = parseFloat(wp0[idxB]) || 0;
 
-// Set home location directly (NO OFFSET MATH!)
-home.lat = wp0_lat;
-home.lon = wp0_lon;
+    // LATITUDE SHIFT FOR HORIZONTAL
+    home.lat = home.lat + (h0 / 111320.0);
 
-// Update UI fields
-document.getElementById("lat").value     = wp0_lat.toFixed(8);
-document.getElementById("lon").value     = wp0_lon.toFixed(8);
-document.getElementById("bearing").value = wp0_bear.toFixed(2);
+    // LONGITUDE SHIFT BASED ON BEARING VALUE IN WP0
+    home.lon = home.lon + ((b0 / 111320.0) / Math.cos(home.lat * Math.PI / 180));
 
-// Redraw map markers
-drawHomeMarker();
-drawHomeLabel();
+    document.getElementById("lat").value = home.lat.toFixed(8);
+    document.getElementById("lon").value = home.lon.toFixed(8);
 
-
+    drawHomeLabel();
+    drawHomeMarker();
 
     // ===========================
     //  Remaining WP rows → table

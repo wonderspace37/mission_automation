@@ -106,10 +106,7 @@ export default async function handler(req, res) {
             poiAltitudeMode,
             photoTimeInterval,
             photoDistInterval,
-
-
         ]);
-
 
         // ---- Remaining waypoints: ABSOLUTE FROM HOME ----
         for (const wp of waypoints) {
